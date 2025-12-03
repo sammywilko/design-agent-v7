@@ -175,7 +175,8 @@ const getClient = async (): Promise<GoogleGenAI> => {
   if (cachedClient) return cachedClient;
 
   await checkApiKey();
-  cachedClient = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY || '';
+  cachedClient = new GoogleGenAI({ apiKey });
   return cachedClient;
 };
 
