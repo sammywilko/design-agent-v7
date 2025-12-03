@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Channel Changers - Design Agent 7.0</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%230ea5e9'/><text x='50' y='68' font-family='system-ui' font-weight='bold' font-size='42' fill='white' text-anchor='middle'>CC</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              serif: ['Playfair Display', 'serif'],
+            },
+            colors: {
+              zinc: {
+                850: '#1f1f22',
+                950: '#09090b',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* === DESIGN SYSTEM: Signal & Form + Sora Finance Hybrid === */
+
+      :root {
+        /* BACKGROUNDS */
+        --bg-base: black;
+        --bg-surface: rgba(255,255,255,0.05);
+        --bg-elevated: rgba(255,255,255,0.10);
+
+        /* TEXT */
+        --text-primary: #f5f5f5;
+        --text-secondary: rgba(255,255,255,0.70);
+        --text-muted: rgba(255,255,255,0.50);
+        --text-accent: #38bdf8;
+
+        /* BORDERS */
+        --border-subtle: rgba(255,255,255,0.10);
+        --border-hover: rgba(255,255,255,0.20);
+
+        /* ACCENT (Sky from Sora Finance) */
+        --accent-primary: #0ea5e9;
+        --accent-glow: rgba(14,165,233,0.30);
+
+        /* LEGACY ACCENT (Violet - for gradual migration) */
+        --accent-violet: #8b5cf6;
+        --accent-violet-glow: rgba(139,92,246,0.30);
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+      /* Glass Panel */
+      .glass-panel {
+        background: rgba(24, 24, 27, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      /* === NEW UTILITY CLASSES === */
+
+      /* Card Surface - use instead of bg-zinc-900 */
+      .card-surface {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 1rem;
+      }
+      .card-surface:hover {
+        background: rgba(255,255,255,0.08);
+      }
+
+      /* Accent Button (Sky Glow) */
+      .btn-accent {
+        background: linear-gradient(to bottom right, rgba(14,165,233,0.2), black, rgba(0,0,0,0.8));
+        border: 2px solid rgba(14,165,233,0.30);
+        border-radius: 9999px;
+        padding: 0.625rem 1.5rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: white;
+        transition: all 0.2s;
+      }
+      .btn-accent:hover {
+        box-shadow: 0 25px 50px -12px rgba(14,165,233,0.30);
+        border-color: rgba(14,165,233,0.50);
+      }
+
+      /* Primary Button (White) */
+      .btn-primary {
+        background: white;
+        color: black;
+        border-radius: 9999px;
+        padding: 0.625rem 1.5rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        transition: all 0.2s;
+      }
+      .btn-primary:hover {
+        background: rgba(255,255,255,0.90);
+      }
+
+      /* Badge/Pill */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        border-radius: 9999px;
+        background: rgba(255,255,255,0.05);
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: rgba(255,255,255,0.80);
+        border: 1px solid rgba(255,255,255,0.10);
+      }
+
+      /* Ring border utility */
+      .ring-surface {
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
+      }
+      .ring-surface-hover:hover {
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.20);
+      }
+
+      /* Serif accent for headings */
+      .text-accent-serif {
+        font-family: 'Playfair Display', serif;
+        font-style: italic;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body class="bg-black text-white antialiased selection:bg-sky-500/30 selection:text-sky-200">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

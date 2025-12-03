@@ -1,0 +1,8 @@
+{
+  "name": "Channel Changers - Design Agent 5.0",
+  "description": "A multimodal visual reasoning and image-generation director built on Gemini 3.0 Pro.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
