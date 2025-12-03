@@ -11,7 +11,9 @@ import ScriptStudio from './components/ScriptStudio';
 import PipelineOverview from './components/PipelineOverview';
 import MoodBoardPanel from './components/MoodBoardPanel';
 import ProducerChat from './components/ProducerChat';
+import CollaborationPanel from './components/CollaborationPanel';
 import { ProducerAppContext } from './services/producerAgent';
+import { useCollaboration } from './hooks/useCollaboration';
 import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage } from './types';
 import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2 } from 'lucide-react';
 import { db } from './services/db';
@@ -64,6 +66,16 @@ const App: React.FC = () => {
   // Undo System for Agent Actions
   const [scriptHistory, setScriptHistory] = useState<ScriptData[]>([]);
   const MAX_UNDO_HISTORY = 20;
+
+  // Collaboration Hook
+  const collaboration = useCollaboration({
+    scriptData,
+    moodBoards,
+    globalHistory,
+    setScriptData: (data) => setScriptData(data),
+    setMoodBoards: (boards) => setMoodBoards(boards),
+    setGlobalHistory: (history) => setGlobalHistory(history)
+  });
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -1169,8 +1181,24 @@ ${clips}
                 <h1 className="text-sm font-semibold text-white tracking-tight hidden sm:block">{currentProject.name}</h1>
                 <button onClick={() => setShowWelcomeGuide(true)} className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors"><HelpCircle className="w-4 h-4" /></button>
             </div>
+
+            {/* Collaboration Status */}
+            <CollaborationPanel
+                mode={collaboration.mode}
+                projectId={collaboration.projectId}
+                shareUrl={collaboration.shareUrl}
+                syncStatus={collaboration.syncStatus}
+                lastSyncedAt={collaboration.lastSyncedAt}
+                lastEditedBy={collaboration.lastEditedBy}
+                isOwner={collaboration.isOwner}
+                error={collaboration.error}
+                isFirebaseAvailable={collaboration.isFirebaseAvailable}
+                onStartSharing={collaboration.startSharing}
+                onStopSharing={collaboration.stopSharing}
+                onSyncNow={collaboration.syncNow}
+            />
         </div>
-        
+
         {/* Navigation Tabs */}
         <div className="flex bg-zinc-900/50 p-1 rounded-xl border border-white/5 backdrop-blur-md absolute left-1/2 transform -translate-x-1/2 shadow-xl">
             <button onClick={() => setStage(AppStage.STAGE_0_SCRIPT)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_0_SCRIPT ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
