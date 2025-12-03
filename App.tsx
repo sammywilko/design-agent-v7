@@ -1286,7 +1286,7 @@ ${clips}
                 onClearIncomingPrompt={() => setIncomingBeatPrompt(null)}
                 onSendToScript={handleSendToScript}
                 onSendToStoryboard={handleSendToStoryboard}
-                bibleCharacters={scriptData?.characters?.filter(c => c.isLocked) || []}
+                bibleCharacters={scriptData?.characters || []}
                 productionDesign={scriptData?.productionDesign}
             />
         </div>

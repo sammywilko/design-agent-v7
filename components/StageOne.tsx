@@ -528,62 +528,60 @@ const StageOne: React.FC<StageOneProps> = ({
 
   // Parse @mentions and inject character references
   const parseAndInjectMentions = (): ReferenceAsset[] => {
-    const mentionRegex = /@(\w+)/g;
-    const mentions = input.match(mentionRegex) || [];
     const injectedRefs: ReferenceAsset[] = [];
+    const lowerInput = input.toLowerCase();
 
-    for (const mention of mentions) {
-      const charName = mention.slice(1).toLowerCase(); // Remove @ and lowercase
-      const character = bibleCharacters.find(c => c.name.toLowerCase() === charName);
+    // Check each Bible character to see if they're mentioned (supports multi-word names)
+    for (const character of bibleCharacters) {
+      const mentionPattern = '@' + character.name.toLowerCase();
+      if (!lowerInput.includes(mentionPattern)) continue;
 
-      if (character) {
-        // Collect all available refs for this character
-        const allRefs: string[] = [];
+      // Collect all available refs for this character
+      const allRefs: string[] = [];
 
-        // Priority 1: Character Sheet (best for consistency)
-        if (character.characterSheet) {
-          allRefs.push(character.characterSheet);
-        }
+      // Priority 1: Character Sheet (best for consistency)
+      if (character.characterSheet) {
+        allRefs.push(character.characterSheet);
+      }
 
-        // Priority 2: Categorized refs (refCoverage)
-        if (character.refCoverage) {
-          // Prefer 3/4 view for general use, then face, fullBody, action
-          const coverageOrder: Array<'threeQuarter' | 'face' | 'fullBody' | 'action'> = ['threeQuarter', 'face', 'fullBody', 'action'];
-          for (const category of coverageOrder) {
-            const refs = character.refCoverage[category];
-            if (refs && refs.length > 0) {
-              allRefs.push(...refs);
-            }
+      // Priority 2: Categorized refs (refCoverage)
+      if (character.refCoverage) {
+        // Prefer 3/4 view for general use, then face, fullBody, action
+        const coverageOrder: Array<'threeQuarter' | 'face' | 'fullBody' | 'action'> = ['threeQuarter', 'face', 'fullBody', 'action'];
+        for (const category of coverageOrder) {
+          const refs = character.refCoverage[category];
+          if (refs && refs.length > 0) {
+            allRefs.push(...refs);
           }
         }
+      }
 
-        // Priority 3: Legacy imageRefs
-        if (character.imageRefs && character.imageRefs.length > 0) {
-          allRefs.push(...character.imageRefs);
-        }
+      // Priority 3: Legacy imageRefs
+      if (character.imageRefs && character.imageRefs.length > 0) {
+        allRefs.push(...character.imageRefs);
+      }
 
-        // Deduplicate and limit to 3 refs
-        const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
+      // Deduplicate and limit to 3 refs
+      const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
 
-        if (uniqueRefs.length > 0) {
-          // Add first reference with prompt snippet
+      if (uniqueRefs.length > 0) {
+        // Add first reference with prompt snippet
+        injectedRefs.push({
+          id: `mention-${character.id}`,
+          data: uniqueRefs[0],
+          type: 'Character',
+          name: character.name,
+          styleDescription: character.promptSnippet
+        });
+
+        // Add additional refs for better consistency
+        for (let i = 1; i < uniqueRefs.length; i++) {
           injectedRefs.push({
-            id: `mention-${character.id}`,
-            data: uniqueRefs[0],
+            id: `mention-${character.id}-${i}`,
+            data: uniqueRefs[i],
             type: 'Character',
-            name: character.name,
-            styleDescription: character.promptSnippet
+            name: `${character.name} (ref ${i + 1})`
           });
-
-          // Add additional refs for better consistency
-          for (let i = 1; i < uniqueRefs.length; i++) {
-            injectedRefs.push({
-              id: `mention-${character.id}-${i}`,
-              data: uniqueRefs[i],
-              type: 'Character',
-              name: `${character.name} (ref ${i + 1})`
-            });
-          }
         }
       }
     }

@@ -1709,15 +1709,15 @@ Example:
                             const isGeneratingAvatar = generatingAvatarFor === char.id;
                             
                             return (
-                                <div key={char.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative ${isLocked ? 'border-amber-500/50 shadow-amber-900/20 shadow-lg' : hasRef ? 'border-emerald-500/30 shadow-emerald-900/10 shadow-lg' : 'border-white/5'}`}>
+                                <div key={char.id} className={`bg-zinc-900 border rounded-2xl group transition-all relative flex flex-col max-h-[700px] ${isLocked ? 'border-amber-500/50 shadow-amber-900/20 shadow-lg' : hasRef ? 'border-emerald-500/30 shadow-emerald-900/10 shadow-lg' : 'border-white/5'}`}>
                                     {/* Lock Badge */}
                                     {isLocked && (
                                         <div className="absolute top-3 left-3 z-20 bg-amber-500 text-black text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
                                             <Lock className="w-3 h-3"/> MASTER
                                         </div>
                                     )}
-                                    
-                                    <div className="h-40 bg-zinc-950 relative">
+
+                                    <div className="h-40 bg-zinc-950 relative shrink-0 rounded-t-2xl overflow-hidden">
                                         {hasRef ? (
                                             <div className="w-full h-full flex">
                                                 {char.imageRefs!.slice(0, 3).map((ref, i) => (
@@ -1735,8 +1735,8 @@ Example:
                                                 </div>
                                             )}
                                             <button className="bg-black/60 hover:bg-emerald-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors" onClick={() => document.getElementById(`upload-char-${char.id}`)?.click()}><Upload className="w-3 h-3" /></button>
-                                            <button 
-                                                onClick={() => deleteCharacter(char.id)} 
+                                            <button
+                                                onClick={() => deleteCharacter(char.id)}
                                                 className={`bg-black/60 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-600'}`}
                                                 title={isLocked ? "Unlock to delete" : "Delete character"}
                                             >
@@ -1746,8 +1746,8 @@ Example:
                                         <h3 className="absolute bottom-3 left-4 font-bold text-lg text-white">{char.name}</h3>
                                         <input type="file" id={`upload-char-${char.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, char.id, 'character', true)} />
                                     </div>
-                                    
-                                    <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar">
+
+                                    <div className="flex-1 p-4 space-y-3 overflow-y-auto min-h-0">
                                         {/* Visual Description */}
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase">Visual Description</label>
