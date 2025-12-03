@@ -504,7 +504,7 @@ const StageOne: React.FC<StageOneProps> = ({
     const textBeforeCursor = value.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
 
-    if (atMatch && bibleCharacters.length > 0) {
+    if (atMatch && Array.isArray(bibleCharacters) && bibleCharacters.length > 0) {
       setShowMentions(true);
       setMentionFilter(atMatch[1].toLowerCase());
       setMentionCursorPos(cursorPos);
@@ -522,7 +522,9 @@ const StageOne: React.FC<StageOneProps> = ({
     setShowMentions(false);
   };
 
-  const filteredCharacters = bibleCharacters.filter(c =>
+  // Safety check for @mention filtering
+  const safeCharacters = Array.isArray(bibleCharacters) ? bibleCharacters : [];
+  const filteredCharacters = safeCharacters.filter(c =>
     c.name.toLowerCase().includes(mentionFilter)
   );
 
@@ -531,8 +533,11 @@ const StageOne: React.FC<StageOneProps> = ({
     const injectedRefs: ReferenceAsset[] = [];
     const lowerInput = input.toLowerCase();
 
+    // Safety check: ensure bibleCharacters is an array
+    const characters = Array.isArray(bibleCharacters) ? bibleCharacters : [];
+
     // Check each Bible character to see if they're mentioned (supports multi-word names)
-    for (const character of bibleCharacters) {
+    for (const character of characters) {
       const mentionPattern = '@' + character.name.toLowerCase();
       if (!lowerInput.includes(mentionPattern)) continue;
 
@@ -626,10 +631,11 @@ const StageOne: React.FC<StageOneProps> = ({
     // Clean @mentions from prompt and add character context
     let processedPrompt = input;
     const mentionedNames = (input.match(/@(\w+)/g) || []).map(m => m.slice(1));
+    const safeChars = Array.isArray(bibleCharacters) ? bibleCharacters : [];
 
     if (mentionedNames.length > 0) {
       const charContexts = mentionedNames.map(name => {
-        const char = bibleCharacters.find(c => c.name.toLowerCase() === name.toLowerCase());
+        const char = safeChars.find(c => c.name.toLowerCase() === name.toLowerCase());
         if (char?.promptSnippet) return `[${char.name}: ${char.promptSnippet}]`;
         return `[${name}]`;
       }).join(' ');
