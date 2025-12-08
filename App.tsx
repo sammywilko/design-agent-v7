@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import StageOne from './components/StageOne';
 import StageTwo from './components/StageTwo';
 import StageThree from './components/StageThree';
@@ -12,19 +12,29 @@ import PipelineOverview from './components/PipelineOverview';
 import MoodBoardPanel from './components/MoodBoardPanel';
 import ProducerChat from './components/ProducerChat';
 import CollaborationPanel from './components/CollaborationPanel';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage, ReferenceAsset, ReferenceType } from './types';
-import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2 } from 'lucide-react';
+import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2, Keyboard } from 'lucide-react';
 import { db } from './services/db';
 import { generateCharacterSheet, generateExpressionBank, generateImage } from './services/gemini';
 import { generateThumbnail } from './services/imageUtils';
 import { analyzeImage, extractStyleDNA, ensureThumbnail } from './services/moodBoardService';
 import JSZip from 'jszip';
 
+type ToastType = 'success' | 'error' | 'warning' | 'info';
+
 interface ToastMsg {
     id: string;
     message: string;
+    type: ToastType;
+    duration?: number;
+    action?: {
+        label: string;
+        onClick: () => void;
+    };
 }
 
 const App: React.FC = () => {
@@ -36,10 +46,16 @@ const App: React.FC = () => {
   const [workingImage, setWorkingImage] = useState<GeneratedImage | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Edit Queue System - prevent accidental overwrites
+  const [editQueue, setEditQueue] = useState<GeneratedImage[]>([]);
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  const [showEditQueueModal, setShowEditQueueModal] = useState(false);
+  const [pendingEditImage, setPendingEditImage] = useState<GeneratedImage | null>(null);
   
   // Script Data State
   const [scriptData, setScriptData] = useState<ScriptData | undefined>(undefined);
-  const [incomingBeatPrompt, setIncomingBeatPrompt] = useState<{prompt: string, refs: any[], isSequence?: boolean, beatId?: string} | null>(null);
+  const [incomingBeatPrompt, setIncomingBeatPrompt] = useState<{prompt: string, refs: ReferenceAsset[], isSequence?: boolean, beatId?: string} | null>(null);
   const [incomingGhostBeats, setIncomingGhostBeats] = useState<Beat[] | null>(null);
   const [incomingCharacter, setIncomingCharacter] = useState<GeneratedImage | null>(null); // New state for back-porting
 
@@ -63,6 +79,9 @@ const App: React.FC = () => {
   // Producer Agent State
   const [showProducerChat, setShowProducerChat] = useState(false);
 
+  // Keyboard Shortcuts Modal
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
   // Undo System for Agent Actions
   const [scriptHistory, setScriptHistory] = useState<ScriptData[]>([]);
   const MAX_UNDO_HISTORY = 20;
@@ -75,6 +94,14 @@ const App: React.FC = () => {
     setScriptData: (data) => setScriptData(data),
     setMoodBoards: (boards) => setMoodBoards(boards),
     setGlobalHistory: (history) => setGlobalHistory(history)
+  });
+
+  // Keyboard Shortcuts Hook
+  useKeyboardShortcuts({
+    setStage,
+    toggleAssistant: useCallback(() => setIsAssistantOpen(prev => !prev), []),
+    toggleMoodBoard: useCallback(() => setShowMoodBoardPanel(prev => !prev), []),
+    onShowHelp: useCallback(() => setShowShortcutsModal(true), []),
   });
 
   useEffect(() => {
@@ -191,13 +218,23 @@ const App: React.FC = () => {
       }
   };
 
-  const showNotification = (message: string) => {
+  const showNotification = (
+      message: string,
+      type: ToastType = 'info',
+      options?: {
+          duration?: number;
+          action?: { label: string; onClick: () => void }
+      }
+  ) => {
       const id = crypto.randomUUID();
-      setToast({ id, message });
+      const duration = options?.duration ?? (type === 'error' ? 6000 : type === 'warning' ? 4500 : 3000);
+      setToast({ id, message, type, duration, action: options?.action });
       setTimeout(() => {
           setToast(prev => prev?.id === id ? null : prev);
-      }, 3000);
+      }, duration);
   };
+
+  const dismissToast = () => setToast(null);
 
   // --- CONNECTED WORKFLOW HANDLERS ---
 
@@ -273,7 +310,7 @@ const App: React.FC = () => {
       prompt += `\n\nSHOT ACTION: ${beat.visualSummary}. Shot Type: ${beat.shotType}. Mood: ${beat.mood}.`;
 
       // 2. Gather all relevant refs and snippets
-      const relevantRefs: any[] = [];
+      const relevantRefs: ReferenceAsset[] = [];
 
       // Include mood board reference images (first 2-3 for style guidance)
       if (activeMoodBoard?.images && activeMoodBoard.images.length > 0) {
@@ -491,7 +528,7 @@ const App: React.FC = () => {
       prompt += `Mood: ${beat.mood}. Maintain visual continuity across all 4 frames.`;
 
       // Gather refs
-      const relevantRefs: any[] = [];
+      const relevantRefs: ReferenceAsset[] = [];
 
       // Include mood board reference images (first 2-3 for style guidance)
       if (activeMoodBoard?.images && activeMoodBoard.images.length > 0) {
@@ -738,8 +775,62 @@ const App: React.FC = () => {
 
   const handleImageSelect = (image: GeneratedImage) => {
     addToGlobalHistory(image);
+
+    // If already in edit mode with unsaved changes, show queue modal
+    if (stage === AppStage.STAGE_2_EDITING && hasUnsavedEdits) {
+      setPendingEditImage(image);
+      setShowEditQueueModal(true);
+      return;
+    }
+
     setWorkingImage(image);
+    setHasUnsavedEdits(false); // Reset for new edit session
     setStage(AppStage.STAGE_2_EDITING);
+  };
+
+  // Edit Queue Modal Actions
+  const handleQueueEdit = () => {
+    if (pendingEditImage) {
+      setEditQueue(prev => [...prev, pendingEditImage]);
+      showNotification(`Added to edit queue (${editQueue.length + 1} pending)`);
+    }
+    setPendingEditImage(null);
+    setShowEditQueueModal(false);
+  };
+
+  const handleSwitchEdit = () => {
+    if (pendingEditImage) {
+      setWorkingImage(pendingEditImage);
+      setHasUnsavedEdits(false);
+    }
+    setPendingEditImage(null);
+    setShowEditQueueModal(false);
+  };
+
+  const handleCancelQueueModal = () => {
+    setPendingEditImage(null);
+    setShowEditQueueModal(false);
+  };
+
+  // Process next item in edit queue
+  const processNextInQueue = () => {
+    if (editQueue.length > 0) {
+      const [next, ...rest] = editQueue;
+      setEditQueue(rest);
+      setWorkingImage(next);
+      setHasUnsavedEdits(false);
+      showNotification(`Loading queued image (${rest.length} remaining)`);
+    }
+  };
+
+  // Called when edits are made in StageTwo
+  const markEditsUnsaved = () => {
+    setHasUnsavedEdits(true);
+  };
+
+  // Called when user finishes with current edit (save/done)
+  const markEditsDone = () => {
+    setHasUnsavedEdits(false);
   };
   
   const handleSendToVideo = (start: GeneratedImage, end?: GeneratedImage, prompt?: string) => {
@@ -1174,11 +1265,43 @@ ${clips}
   return (
     <div className="h-screen w-screen flex flex-col bg-zinc-950 overflow-hidden font-sans relative text-white">
       <WelcomeGuide isOpen={showWelcomeGuide} onClose={closeWelcomeGuide} />
+      <KeyboardShortcutsModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
 
       {toast && (
-          <div className="fixed bottom-8 right-8 z-[100] bg-zinc-800/90 backdrop-blur-md text-white px-6 py-4 rounded-2xl shadow-2xl border border-white/5 animate-in slide-in-from-bottom-5 fade-in duration-300 flex items-center gap-3 ring-1 ring-white/10">
-              <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse shadow-[0_0_10px_rgba(139,92,246,0.5)]" />
-              <span className="font-medium text-sm tracking-wide">{toast.message}</span>
+          <div className={`fixed bottom-8 right-8 z-[100] backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 flex items-center gap-3 max-w-md ${
+              toast.type === 'error' ? 'bg-red-900/90 border-red-500/30 ring-1 ring-red-500/20' :
+              toast.type === 'success' ? 'bg-emerald-900/90 border-emerald-500/30 ring-1 ring-emerald-500/20' :
+              toast.type === 'warning' ? 'bg-amber-900/90 border-amber-500/30 ring-1 ring-amber-500/20' :
+              'bg-zinc-800/90 border-white/5 ring-1 ring-white/10'
+          }`}>
+              {/* Icon based on type */}
+              <div className={`w-2 h-2 rounded-full shrink-0 ${
+                  toast.type === 'error' ? 'bg-red-500' :
+                  toast.type === 'success' ? 'bg-emerald-500' :
+                  toast.type === 'warning' ? 'bg-amber-500 animate-pulse' :
+                  'bg-violet-500 animate-pulse'
+              }`} />
+              <span className="font-medium text-sm tracking-wide flex-1">{toast.message}</span>
+              {/* Action button if provided */}
+              {toast.action && (
+                  <button
+                      onClick={() => { toast.action?.onClick(); dismissToast(); }}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${
+                          toast.type === 'error' ? 'bg-red-500/20 hover:bg-red-500/40 text-red-200' :
+                          toast.type === 'success' ? 'bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200' :
+                          toast.type === 'warning' ? 'bg-amber-500/20 hover:bg-amber-500/40 text-amber-200' :
+                          'bg-white/10 hover:bg-white/20'
+                      }`}
+                  >
+                      {toast.action.label}
+                  </button>
+              )}
+              {/* Dismiss button */}
+              <button onClick={dismissToast} className="text-white/50 hover:text-white transition-colors">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+              </button>
           </div>
       )}
 
@@ -1263,6 +1386,9 @@ ${clips}
             </button>
             <button onClick={handleExportZip} disabled={isExporting} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Download Project ZIP">
                 {isExporting ? <Loader2 className="w-5 h-5 animate-spin"/> : <DownloadCloud className="w-5 h-5" />}
+            </button>
+            <button onClick={() => setShowShortcutsModal(true)} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Keyboard Shortcuts (?)">
+                <Keyboard className="w-5 h-5" />
             </button>
             <button onClick={() => setShowProducerChat(!showProducerChat)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all duration-300 shadow-lg ${showProducerChat ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-transparent' : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white hover:border-white/20'}`}>
                 <Sparkles className="w-4 h-4" /><span className="text-xs font-bold hidden md:inline">Producer AI</span>
@@ -1352,9 +1478,15 @@ ${clips}
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_2_EDITING ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <StageTwo
                 initialImage={workingImage}
-                onBack={() => setStage(AppStage.STAGE_1_CONCEPT)}
+                onBack={() => {
+                    setStage(AppStage.STAGE_1_CONCEPT);
+                    markEditsDone();
+                }}
                 showNotification={showNotification}
-                onImageEdited={(img) => addToGlobalHistory(img)}
+                onImageEdited={(img) => {
+                    addToGlobalHistory(img);
+                    markEditsUnsaved();
+                }}
                 onAddToGallery={(img) => addToGlobalHistory(img)}
                 currentProject={currentProject}
                 onLibraryUpdate={refreshLibrary}
@@ -1362,6 +1494,8 @@ ${clips}
                 bibleCharacters={scriptData?.characters || []}
                 bibleLocations={scriptData?.locations || []}
                 bibleProducts={scriptData?.products || []}
+                editQueue={editQueue}
+                onProcessQueue={processNextInQueue}
             />
         </div>
 
@@ -1391,6 +1525,63 @@ ${clips}
             />
         </div>
         </div>{/* End Main Content Area */}
+
+        {/* Edit Queue Confirmation Modal */}
+        {showEditQueueModal && pendingEditImage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+              {/* Header */}
+              <div className="p-6 border-b border-zinc-800">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-amber-400" />
+                  Edit in Progress
+                </h3>
+                <p className="text-sm text-zinc-400 mt-1">
+                  You have unsaved edits. What would you like to do?
+                </p>
+              </div>
+
+              {/* Pending Image Preview */}
+              <div className="p-4 bg-zinc-950/50">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={pendingEditImage.url}
+                    alt="Pending edit"
+                    className="w-20 h-20 object-cover rounded-lg border border-zinc-700"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">New Image</p>
+                    <p className="text-sm text-zinc-300 truncate">{pendingEditImage.prompt}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="p-4 space-y-3">
+                <button
+                  onClick={handleQueueEdit}
+                  className="w-full py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <Layers className="w-4 h-4" />
+                  Add to Queue ({editQueue.length + 1} pending)
+                </button>
+                <button
+                  onClick={handleSwitchEdit}
+                  className="w-full py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Switch Now (Discard Current)
+                </button>
+                <button
+                  onClick={handleCancelQueueModal}
+                  className="w-full py-2 text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

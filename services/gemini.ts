@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Schema, Part } from "@google/genai";
-import { DirectorResponse, GeneratedImage, GenerationConfig, ReferenceAsset, GeneratedVideo, Beat, CharacterProfile, CoverageAnalysis, Lookbook, ToolMode, ReferenceBundle, QualityScore, MoodBoard, LocationProfile, ProductProfile, VariantType, ProductionDesign } from "../types";
+import { DirectorResponse, GeneratedImage, GenerationConfig, ReferenceAsset, GeneratedVideo, Beat, CharacterProfile, CoverageAnalysis, Lookbook, ToolMode, ReferenceBundle, QualityScore, MoodBoard, LocationProfile, ProductProfile, VariantType, ProductionDesign, StyleDNA, ProjectDefaultStyle, CharacterSpecs as CharacterSpecsType } from "../types";
 
 const NANO_BANANA_GUIDE = `
 NANO BANANA PRO (GEMINI 3 PRO IMAGE) MASTER GUIDE:
@@ -113,6 +113,14 @@ Capabilities:
 3. Technical Rendering: For schematics/products, prioritize text legibility and geometric accuracy.
 4. Style Extraction: If 'Style' ref is provided, treat it as a "Style DNA" template.
 
+CRITICAL - SCALE & COMPOSITION (When combining Characters + Locations):
+- Characters MUST be human-scale relative to environments. A person is ~1.7m tall.
+- Use cinematic composition: wide/medium establishing shots with characters naturally placed.
+- Specify depth layers: "character in foreground/midground, architecture in background"
+- Include perspective cues: "ground-level view", "eye-level camera", "looking up at building"
+- Avoid surreal scaling - characters should never appear giant or miniature.
+- Always specify shot type: "wide shot showing full environment with character", "medium shot character against backdrop"
+
 User Custom Instructions: {{CUSTOM_INSTRUCTIONS}}
 
 Output Structure:
@@ -122,7 +130,7 @@ Output Structure:
 
 You must return a JSON object:
 - "analysis": Markdown string.
-- "imagePrompts": Array of strings.
+- "imagePrompts": Array of strings (ALWAYS include shot type and scale context in prompts).
 `;
 
 const SYSTEM_INSTRUCTION_STAGE_2 = `
@@ -188,6 +196,50 @@ const getMimeType = (dataUrl: string): string => {
 const cleanDataUrl = (dataUrl: string): string => {
   return dataUrl.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 };
+
+// ============================================
+// TIMEOUT UTILITY FOR API CALLS
+// ============================================
+
+const DEFAULT_TIMEOUT_MS = 60000; // 60 seconds default
+const LONG_TIMEOUT_MS = 180000;   // 3 minutes for video generation
+
+class TimeoutError extends Error {
+  constructor(message: string = 'Request timed out') {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Wraps a promise with a timeout. If the promise doesn't resolve within
+ * the specified time, it rejects with a TimeoutError.
+ */
+const withTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  operationName: string = 'API call'
+): Promise<T> => {
+  let timeoutId: NodeJS.Timeout;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new TimeoutError(`${operationName} timed out after ${timeoutMs / 1000} seconds`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutId!);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId!);
+    throw error;
+  }
+};
+
+// Export the timeout error type for handling
+export { TimeoutError };
 
 /**
  * Extracts Style DNA from an image.
@@ -407,19 +459,22 @@ export const consultDirector = async (
   const parts: (string | Part)[] = [];
   let promptContext = userPrompt;
 
-  if (references.length > 0) {
+  // Ensure references is always a safe array
+  const safeReferences = Array.isArray(references) ? references : [];
+
+  if (safeReferences.length > 0) {
     promptContext += "\n\nATTACHED REFERENCES:";
-    references.forEach((ref, index) => {
+    safeReferences.forEach((ref, index) => {
       let desc = `[Reference ${index + 1}]: Type=${ref.type} (${ref.name || 'Unnamed'})`;
       if (ref.type === 'Style' && ref.styleDescription) {
         desc += `\n   >> STYLE DNA TO APPLY: "${ref.styleDescription}"`;
       }
       promptContext += `\n${desc}`;
     });
-    
+
     parts.push({ text: promptContext });
 
-    references.forEach((ref) => {
+    safeReferences.forEach((ref) => {
       parts.push({
         inlineData: {
           data: cleanDataUrl(ref.data),
@@ -435,18 +490,22 @@ export const consultDirector = async (
     .replace('{{CUSTOM_INSTRUCTIONS}}', customInstructions)
     .replace('{{IMAGE_COUNT}}', imageCount.toString());
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: {
-      role: 'user',
-      parts: parts as any
-    },
-    config: {
-      systemInstruction: finalSystemInstruction,
-      responseMimeType: "application/json",
-      responseSchema: responseSchema
-    }
-  });
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: {
+        role: 'user',
+        parts: parts as any
+      },
+      config: {
+        systemInstruction: finalSystemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: responseSchema
+      }
+    }),
+    45000, // 45 seconds for director consultation
+    'Director consultation'
+  );
 
   const text = response.text;
   if (!text) throw new Error("No response from Director");
@@ -458,8 +517,8 @@ export const consultDirector = async (
  * Stage 1 & 2: Image Generation.
  */
 export const generateImage = async (
-    prompt: string, 
-    references: ReferenceAsset[], 
+    prompt: string,
+    references: ReferenceAsset[],
     config: GenerationConfig,
     useGrounding: boolean = false
 ): Promise<GeneratedImage> => {
@@ -468,9 +527,12 @@ export const generateImage = async (
   const parts: any[] = [];
   let explicitPrompt = prompt;
 
-  if (references.length > 0) {
+  // Ensure references is always a safe array
+  const safeReferences = Array.isArray(references) ? references : [];
+
+  if (safeReferences.length > 0) {
       explicitPrompt += "\n\nREFERENCES:";
-      references.forEach((ref, idx) => {
+      safeReferences.forEach((ref, idx) => {
         explicitPrompt += `\n- Ref ${idx + 1} (${ref.type}): ${ref.name || 'Image'}`;
         if (ref.type === 'Style' && ref.styleDescription) {
             explicitPrompt += ` (Style DNA: ${ref.styleDescription})`;
@@ -478,11 +540,11 @@ export const generateImage = async (
       });
       explicitPrompt += "\nUse these references strictly.";
   }
-  
+
   parts.push({ text: explicitPrompt });
 
-  if (references.length > 0) {
-      references.forEach((ref) => {
+  if (safeReferences.length > 0) {
+      safeReferences.forEach((ref) => {
           parts.push({
             inlineData: {
                 data: cleanDataUrl(ref.data),
@@ -504,13 +566,17 @@ export const generateImage = async (
       requestConfig.tools = [{ googleSearch: {} }];
   }
   
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-image-preview',
-    contents: {
-      parts: parts
-    },
-    config: requestConfig
-  });
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-3-pro-image-preview',
+      contents: {
+        parts: parts
+      },
+      config: requestConfig
+    }),
+    DEFAULT_TIMEOUT_MS,
+    'Image generation'
+  );
 
   const candidates = response.candidates;
   if (!candidates || candidates.length === 0) throw new Error("No image generated");
@@ -533,6 +599,233 @@ export const generateImage = async (
     url: `data:image/png;base64,${base64Data}`,
     prompt: prompt,
     aspectRatio: config.aspectRatio
+  };
+};
+
+/**
+ * Batch result type for parallel generation with graceful failures
+ */
+export interface BatchGenerationResult {
+  successful: GeneratedImage[];
+  failed: Array<{ prompt: string; error: string }>;
+  totalRequested: number;
+  successRate: number;
+}
+
+/**
+ * PARALLEL BATCH IMAGE GENERATION with Graceful Failures
+ * Generates multiple images in parallel, continuing even when individual requests fail.
+ * Returns partial results with success/failure breakdown.
+ *
+ * @param prompts Array of prompts to generate
+ * @param references Shared references for all generations
+ * @param config Generation config (aspect ratio, resolution)
+ * @param useGrounding Whether to use Google Search grounding
+ * @param onProgress Optional callback for progress updates
+ * @param concurrencyLimit Max concurrent requests (default 3 to avoid rate limits)
+ */
+export const generateImageBatch = async (
+    prompts: string[],
+    references: ReferenceAsset[],
+    config: GenerationConfig,
+    useGrounding: boolean = false,
+    onProgress?: (completed: number, total: number, lastResult: 'success' | 'failed') => void,
+    concurrencyLimit: number = 3
+): Promise<BatchGenerationResult> => {
+  const results: GeneratedImage[] = [];
+  const failures: Array<{ prompt: string; error: string }> = [];
+  let completed = 0;
+
+  // Process in batches to respect rate limits
+  const processBatch = async (batchPrompts: string[]): Promise<void> => {
+    const batchPromises = batchPrompts.map(async (prompt) => {
+      try {
+        const img = await generateImage(prompt, references, config, useGrounding);
+        results.push(img);
+        completed++;
+        onProgress?.(completed, prompts.length, 'success');
+        return { success: true };
+      } catch (error: any) {
+        const errorMessage = error?.message || 'Unknown error';
+        console.error(`Batch generation failed for prompt: ${prompt.substring(0, 50)}...`, errorMessage);
+        failures.push({ prompt, error: errorMessage });
+        completed++;
+        onProgress?.(completed, prompts.length, 'failed');
+        return { success: false };
+      }
+    });
+
+    await Promise.all(batchPromises);
+  };
+
+  // Split prompts into chunks based on concurrency limit
+  for (let i = 0; i < prompts.length; i += concurrencyLimit) {
+    const batch = prompts.slice(i, i + concurrencyLimit);
+    await processBatch(batch);
+  }
+
+  return {
+    successful: results,
+    failed: failures,
+    totalRequested: prompts.length,
+    successRate: prompts.length > 0 ? (results.length / prompts.length) * 100 : 0
+  };
+};
+
+/**
+ * 12-SHOT CONTACT SHEET GENERATOR
+ * Professional standard coverage: 12 shots covering all essential camera angles
+ * Generates in parallel with graceful failure handling
+ */
+
+// Standard 12-shot contact sheet configuration
+export const CONTACT_SHEET_12 = [
+  { type: "Extreme Wide", angle: "High Angle Establishing", description: "Establishes geography and scale" },
+  { type: "Wide", angle: "Eye Level Master", description: "Primary scene coverage" },
+  { type: "Full Body", angle: "Low Angle Hero", description: "Empowering character shot" },
+  { type: "Medium", angle: "Front", description: "Standard coverage" },
+  { type: "Medium", angle: "3/4 Profile", description: "Most flattering angle" },
+  { type: "Medium", angle: "Profile", description: "Clean silhouette" },
+  { type: "Medium Close Up", angle: "Front", description: "Emotional connection" },
+  { type: "Close Up", angle: "Front", description: "Intimate detail" },
+  { type: "Close Up", angle: "Side Profile", description: "Dramatic portrait" },
+  { type: "Extreme Close Up", angle: "Eyes/Detail", description: "Maximum intensity" },
+  { type: "Medium", angle: "Dutch Angle", description: "Dynamic tension" },
+  { type: "Over The Shoulder", angle: "Medium", description: "POV/Dialogue setup" }
+];
+
+// Dialogue coverage pack (5 shots)
+export const COVERAGE_PACK_DIALOGUE = [
+  { type: "Wide", angle: "Master Shot", description: "Establishes both characters" },
+  { type: "Medium", angle: "Over The Shoulder A", description: "Character A's perspective" },
+  { type: "Medium", angle: "Over The Shoulder B", description: "Character B's perspective" },
+  { type: "Close Up", angle: "Character A Reaction", description: "Emotional beats" },
+  { type: "Close Up", angle: "Character B Reaction", description: "Emotional beats" }
+];
+
+// Action coverage pack (5 shots)
+export const COVERAGE_PACK_ACTION = [
+  { type: "Wide", angle: "Action Master", description: "Full action geography" },
+  { type: "Low Angle", angle: "Hero Power Shot", description: "Empowering moment" },
+  { type: "Close Up", angle: "Weapon/Prop Detail", description: "Key object" },
+  { type: "Overhead", angle: "Geography/Layout", description: "Tactical view" },
+  { type: "Medium", angle: "Dutch Angle Tension", description: "Dynamic energy" }
+];
+
+export interface ContactSheetResult {
+  shots: Array<{
+    type: string;
+    angle: string;
+    description: string;
+    image?: GeneratedImage;
+    failed?: boolean;
+    error?: string;
+  }>;
+  successCount: number;
+  totalCount: number;
+}
+
+/**
+ * Generate a 12-shot contact sheet for comprehensive character/scene coverage
+ */
+export const generateContactSheet = async (
+  subjectDescription: string,
+  sceneContext: string,
+  references: ReferenceAsset[],
+  config: GenerationConfig,
+  onProgress?: (completed: number, total: number, currentShot: string) => void
+): Promise<ContactSheetResult> => {
+  const shots = CONTACT_SHEET_12.map(shot => ({
+    ...shot,
+    image: undefined as GeneratedImage | undefined,
+    failed: false,
+    error: undefined as string | undefined
+  }));
+
+  let completed = 0;
+
+  // Process in batches of 3 to avoid rate limits
+  for (let i = 0; i < shots.length; i += 3) {
+    const batch = shots.slice(i, Math.min(i + 3, shots.length));
+
+    const batchPromises = batch.map(async (shot, batchIdx) => {
+      const shotIdx = i + batchIdx;
+      const prompt = `Cinematic film shot. ${shot.type} shot. ${shot.angle} angle.
+Subject: ${subjectDescription}.
+Scene: ${sceneContext}.
+Photorealistic, 4k, dramatic cinematic lighting, movie still quality.`;
+
+      try {
+        const img = await generateImage(prompt, references, config, false);
+        shots[shotIdx].image = img;
+        completed++;
+        onProgress?.(completed, shots.length, `${shot.type} - ${shot.angle}`);
+      } catch (error: any) {
+        shots[shotIdx].failed = true;
+        shots[shotIdx].error = error?.message || 'Generation failed';
+        completed++;
+        onProgress?.(completed, shots.length, `${shot.type} - ${shot.angle} (FAILED)`);
+      }
+    });
+
+    await Promise.all(batchPromises);
+  }
+
+  return {
+    shots,
+    successCount: shots.filter(s => s.image).length,
+    totalCount: shots.length
+  };
+};
+
+/**
+ * Generate a coverage pack (dialogue or action) for scene coverage
+ */
+export const generateCoveragePack = async (
+  packType: 'dialogue' | 'action',
+  subjectDescription: string,
+  sceneContext: string,
+  references: ReferenceAsset[],
+  config: GenerationConfig,
+  onProgress?: (completed: number, total: number, currentShot: string) => void
+): Promise<ContactSheetResult> => {
+  const packConfig = packType === 'dialogue' ? COVERAGE_PACK_DIALOGUE : COVERAGE_PACK_ACTION;
+
+  const shots = packConfig.map(shot => ({
+    ...shot,
+    image: undefined as GeneratedImage | undefined,
+    failed: false,
+    error: undefined as string | undefined
+  }));
+
+  let completed = 0;
+
+  // Process all 5 shots in parallel (small enough batch)
+  const promises = shots.map(async (shot, idx) => {
+    const prompt = `Cinematic film shot. ${shot.type} shot. ${shot.angle}.
+Subject: ${subjectDescription}.
+Scene: ${sceneContext}.
+${shot.description}. Photorealistic, dramatic lighting, movie still.`;
+
+    try {
+      const img = await generateImage(prompt, references, config, false);
+      shots[idx].image = img;
+      completed++;
+      onProgress?.(completed, shots.length, `${shot.type} - ${shot.angle}`);
+    } catch (error: any) {
+      shots[idx].failed = true;
+      shots[idx].error = error?.message || 'Generation failed';
+      completed++;
+      onProgress?.(completed, shots.length, `${shot.type} - ${shot.angle} (FAILED)`);
+    }
+  });
+
+  await Promise.all(promises);
+
+  return {
+    shots,
+    successCount: shots.filter(s => s.image).length,
+    totalCount: shots.length
   };
 };
 
@@ -1800,4 +2093,1421 @@ The character must be INSTANTLY recognizable as the same person in every cell.`;
     console.error('Expression bank generation failed:', error);
     return null;
   }
+};
+
+// ============================================
+// SHOT DESIGN AGENT - NEW FEATURES
+// ============================================
+
+/**
+ * SceneBeat type for story planning
+ */
+export interface SceneBeat {
+  beatNumber: number;
+  action: string;
+  recommendedShots: string[];
+  imageUrl?: string;
+}
+
+/**
+ * Generate a beat sheet from a scene idea
+ * Returns structured beats with recommended camera coverage
+ */
+export const generateBeatSheet = async (idea: string): Promise<SceneBeat[]> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash';
+
+    const prompt = `Create a 5-beat sequence for a film scene based on this idea: "${idea}".
+For each beat, provide the action and a list of 2-3 recommended camera shots (e.g., "Wide Master", "Close Up", "Over The Shoulder").
+Return JSON only.
+
+Format:
+[
+  {
+    "beatNumber": 1,
+    "action": "Description of what happens",
+    "recommendedShots": ["Wide Master", "Medium Shot"]
+  }
+]`;
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              beatNumber: { type: Type.INTEGER },
+              action: { type: Type.STRING },
+              recommendedShots: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return [];
+
+    const beats = JSON.parse(text) as SceneBeat[];
+    console.log('📋 Generated beat sheet:', beats.length, 'beats');
+    return beats;
+  } catch (error) {
+    console.error('Beat sheet generation failed:', error);
+    return [];
+  }
+};
+
+/**
+ * Generate location image with time of day, weather, and optional real-world grounding
+ */
+export const generateLocationWithAtmosphere = async (
+  description: string,
+  timeOfDay: string,
+  weather: string,
+  realLocation?: string
+): Promise<string | null> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro
+
+    let prompt = `Cinematic environment concept art. ${description}.`;
+    prompt += ` Time of day: ${timeOfDay}. Weather: ${weather}.`;
+
+    if (realLocation) {
+      prompt += ` Based on real world location: ${realLocation}. Photorealistic, high detail.`;
+    } else {
+      prompt += ` Highly detailed, atmospheric, movie set design.`;
+    }
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseModalities: ['IMAGE', 'TEXT'],
+        imageConfig: {
+          aspectRatio: '16:9',
+          imageSize: '2K'
+        },
+        // Use Google Search if a real location is provided for grounding
+        tools: realLocation ? [{ googleSearch: {} }] : undefined
+      }
+    });
+
+    if (response.candidates?.[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          console.log(`✅ Generated location: ${timeOfDay}, ${weather}`);
+          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Location generation failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Generate texture pack for a location (3 textures)
+ * Returns: surface detail, architectural detail, ground texture
+ */
+export const generateTexturePack = async (locationDescription: string): Promise<string[]> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash-preview-05-20';
+
+    const prompts = [
+      `Close up texture detail of surface for: ${locationDescription}. Material study, photorealistic 8k macro shot.`,
+      `Architectural detail close up for: ${locationDescription}. Lighting study, weathering details.`,
+      `Ground or floor surface texture for: ${locationDescription}. Roughness and weathering detail, top-down view.`
+    ];
+
+    const generateTexture = async (p: string): Promise<string> => {
+      const response = await ai.models.generateContent({
+        model,
+        contents: p,
+        config: {
+          responseModalities: ['IMAGE', 'TEXT'],
+          imageConfig: {
+            aspectRatio: '1:1',
+            imageSize: '1K'
+          }
+        }
+      });
+
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) {
+            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+        }
+      }
+      return '';
+    };
+
+    const results = await Promise.all(prompts.map(p => generateTexture(p)));
+    const validResults = results.filter(r => r !== '');
+    console.log(`🎨 Generated ${validResults.length} textures`);
+    return validResults;
+  } catch (error) {
+    console.error('Texture pack generation failed:', error);
+    return [];
+  }
+};
+
+/**
+ * Camera stability levels for video generation
+ */
+export type CameraStability = 'tripod' | 'handheld' | 'manic';
+
+/**
+ * Generate video with camera stability control
+ * Stability: tripod (0-30), handheld (31-70), manic (71-100)
+ */
+export const generateVideoWithStability = async (
+  prompt: string,
+  stability: number = 20
+): Promise<string | null> => {
+  try {
+    const ai = await getClient();
+    const model = 'veo-3.1-fast-generate-preview';
+
+    // Inject stability context into the prompt
+    let stabilityContext = "";
+    if (stability < 30) {
+      stabilityContext = "Shot on a stable tripod, smooth fluid motion, steadycam, professional cinematography.";
+    } else if (stability < 70) {
+      stabilityContext = "Handheld camera movement, slight organic shake, realistic documentary feel.";
+    } else {
+      stabilityContext = "Intense shaky cam, chaotic action camera, heavy vibration, action movie style.";
+    }
+
+    const finalPrompt = `${prompt}. ${stabilityContext}`;
+    console.log(`🎬 Generating video with stability: ${stability}%`);
+
+    let operation = await ai.models.generateVideos({
+      model,
+      prompt: finalPrompt,
+      config: {
+        numberOfVideos: 1,
+        resolution: '720p',
+        aspectRatio: '16:9'
+      }
+    });
+
+    // Polling for completion
+    while (!operation.done) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      operation = await ai.operations.getVideosOperation({ operation });
+      console.log('⏳ Video generation in progress...');
+    }
+
+    const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+    if (!videoUri) {
+      console.error('No video URI returned');
+      return null;
+    }
+
+    // Fetch the actual video
+    const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY || '';
+    const videoRes = await fetch(`${videoUri}&key=${apiKey}`);
+    if (!videoRes.ok) {
+      console.error('Failed to download video');
+      return null;
+    }
+
+    const blob = await videoRes.blob();
+    console.log('✅ Video generated successfully');
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.error('Video generation with stability failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Camera move templates for video generation
+ */
+export const CAMERA_MOVE_TEMPLATES = [
+  { label: "Orbit", prompt: "Camera orbits 360 degrees around the subject, keeping them centered." },
+  { label: "Dolly In", prompt: "Slow dolly zoom in towards the subject's face, increasing tension." },
+  { label: "Dolly Out", prompt: "Camera pulls back slowly to reveal the environment." },
+  { label: "Truck Left", prompt: "Camera trucks left laterally, following the subject's movement." },
+  { label: "Truck Right", prompt: "Camera trucks right laterally, following the subject's movement." },
+  { label: "Tilt Up", prompt: "Camera tilts up from the ground/feet to the subject's face." },
+  { label: "Crane Shot", prompt: "High angle crane shot lifting up and away from the scene." },
+  { label: "Push In", prompt: "Camera slowly pushes in, building intensity." },
+  { label: "Pull Back Reveal", prompt: "Camera pulls back to reveal context and environment." }
+];
+
+/**
+ * Time of day options for location generation
+ */
+export const TIME_OF_DAY_OPTIONS = [
+  "Dawn",
+  "Morning",
+  "Noon",
+  "Golden Hour",
+  "Blue Hour",
+  "Dusk",
+  "Midnight",
+  "Overcast Day"
+];
+
+/**
+ * Weather options for location generation
+ */
+export const WEATHER_OPTIONS = [
+  "Clear",
+  "Overcast",
+  "Foggy",
+  "Light Rain",
+  "Heavy Rain",
+  "Storm",
+  "Snow",
+  "Dusty",
+  "Dystopian Haze"
+];
+
+// ============================================
+// PRODUCTION METADATA ANALYSIS
+// ============================================
+
+/**
+ * Production metadata extracted from generated images
+ */
+export interface ProductionMetadata {
+  lightingAnalysis: {
+    keyLight: string;        // "High contrast side lighting"
+    fillRatio: string;       // "1:4 ratio, dramatic shadows"
+    colorTemp: string;       // "Warm tungsten (3200K)"
+    practicals: string[];    // ["Neon signs", "Street lamps"]
+    mood: string;            // "Noir, mysterious"
+  };
+  setDressingNotes: {
+    foreground: string;      // "Character silhouette"
+    midground: string;       // "Rain-slicked pavement"
+    background: string;      // "Blurred city lights"
+    atmosphere: string;      // "Dense fog, volumetric"
+  };
+  technicalNotes: {
+    suggestedLens: string;   // "35mm anamorphic"
+    aperture: string;        // "f/2.8 for shallow DOF"
+    shotType: string;        // "Medium wide establishing"
+    cameraHeight: string;    // "Low angle, below eye level"
+  };
+  recommendations: string[]; // Shooting recommendations
+}
+
+/**
+ * Analyze a generated image for production metadata
+ * Provides lighting, set dressing, and technical notes for production reference
+ */
+export const analyzeProductionMetadata = async (imageData: string): Promise<ProductionMetadata | null> => {
+  try {
+    const ai = await getClient();
+
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+          parts: [
+            {
+              text: `Analyze this image as a cinematographer and production designer.
+Provide detailed technical notes for recreating this shot in production.
+
+Return JSON with this structure:
+{
+  "lightingAnalysis": {
+    "keyLight": "Description of main light source and direction",
+    "fillRatio": "Light ratio and shadow density",
+    "colorTemp": "Color temperature description",
+    "practicals": ["List of visible light sources in scene"],
+    "mood": "Overall lighting mood"
+  },
+  "setDressingNotes": {
+    "foreground": "Elements in foreground",
+    "midground": "Central action area description",
+    "background": "Background elements and depth",
+    "atmosphere": "Fog, rain, particles, etc."
+  },
+  "technicalNotes": {
+    "suggestedLens": "Recommended focal length",
+    "aperture": "Suggested f-stop for this DOF",
+    "shotType": "Shot size and framing",
+    "cameraHeight": "Camera position relative to subject"
+  },
+  "recommendations": ["List of 2-3 shooting tips for this look"]
+}`
+            },
+            {
+              inlineData: {
+                data: cleanDataUrl(imageData),
+                mimeType: getMimeType(imageData)
+              }
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json"
+        }
+      }),
+      30000, // 30 seconds for analysis
+      'Production metadata analysis'
+    );
+
+    const text = response.text;
+    if (!text) return null;
+
+    return JSON.parse(text) as ProductionMetadata;
+  } catch (error) {
+    console.error('Production metadata analysis failed:', error);
+    return null;
+  }
+};
+
+// ============================================
+// AI SPEC EXTRACTION - INTELLIGENCE LAYER
+// ============================================
+
+/**
+ * Extracted product specifications from image analysis
+ */
+export interface ProductSpecs {
+  productType: string;        // "Sneaker", "Watch", "Bottle", etc.
+  brand?: string;             // Detected or inferred brand
+  modelName?: string;         // Specific model if identifiable
+  primaryColor: string;       // Main color with hex code
+  secondaryColors: string[];  // Additional colors with hex codes
+  materials: string[];        // ["Leather", "Rubber", "Mesh"]
+  finishes: string[];         // ["Matte", "Glossy", "Metallic"]
+  logoPlacement?: string;     // Where logos/branding appear
+  distinctiveFeatures: string[]; // Unique identifiable elements
+  dimensions?: string;        // Approximate size/proportions
+  promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+/**
+ * Extracted character specifications from image analysis
+ */
+export interface CharacterSpecs {
+  gender: string;
+  ageRange: string;           // "20-25", "35-40", etc.
+  ethnicity?: string;         // For accurate representation
+  skinTone: string;           // Description for consistency
+  hairColor: string;
+  hairStyle: string;
+  eyeColor?: string;
+  facialFeatures: string[];   // ["Angular jawline", "High cheekbones"]
+  bodyType: string;           // "Athletic", "Slim", "Muscular"
+  height?: string;            // "Tall", "Average", "Short"
+  distinctiveFeatures: string[]; // Tattoos, scars, glasses, etc.
+  clothing?: string;          // Current outfit description
+  promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+/**
+ * Extracted location specifications from image analysis
+ */
+export interface LocationSpecs {
+  locationType: string;       // "Urban street", "Beach", "Office"
+  architectureStyle?: string; // "Brutalist", "Art Deco", "Modern"
+  era?: string;               // "Contemporary", "1980s", "Futuristic"
+  dominantColors: string[];   // Main color palette with hex codes
+  lightingSituation: string;  // "Natural daylight", "Neon lights"
+  atmosphere: string;         // "Gritty", "Luxurious", "Industrial"
+  keyElements: string[];      // ["Graffiti walls", "Street lamps", "Wet pavement"]
+  weatherConditions?: string;
+  timeOfDay?: string;
+  realWorldLocation?: string; // If recognizable
+  promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+/**
+ * Extract product specifications from uploaded image
+ */
+export const extractProductSpecs = async (imageData: string): Promise<ProductSpecs | null> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash';
+
+    const cleanData = cleanDataUrl(imageData);
+    const mimeType = getMimeType(imageData);
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `Analyze this product image and extract detailed specifications.
+
+Return a JSON object with these fields:
+- productType: What type of product (e.g., "Sneaker", "Watch", "Bag")
+- brand: Detected or inferred brand name (if visible/recognizable)
+- modelName: Specific model name if identifiable
+- primaryColor: Main color with hex code (e.g., "University Red #DC143C")
+- secondaryColors: Array of other colors with hex codes
+- materials: Array of materials detected (e.g., ["Leather", "Rubber", "Mesh"])
+- finishes: Array of surface finishes (e.g., ["Matte", "Glossy"])
+- logoPlacement: Where logos/branding appear
+- distinctiveFeatures: Array of unique identifying elements
+- dimensions: Approximate proportions/size description
+- promptSnippet: A detailed prompt snippet that would regenerate this exact product
+
+Be extremely precise with colors - use accurate hex codes.
+Focus on visual details that ensure consistent regeneration.`
+            },
+            {
+              inlineData: { data: cleanData, mimeType }
+            }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            productType: { type: Type.STRING },
+            brand: { type: Type.STRING },
+            modelName: { type: Type.STRING },
+            primaryColor: { type: Type.STRING },
+            secondaryColors: { type: Type.ARRAY, items: { type: Type.STRING } },
+            materials: { type: Type.ARRAY, items: { type: Type.STRING } },
+            finishes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            logoPlacement: { type: Type.STRING },
+            distinctiveFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
+            dimensions: { type: Type.STRING },
+            promptSnippet: { type: Type.STRING }
+          }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+
+    const specs = JSON.parse(text) as ProductSpecs;
+    console.log('🔍 Extracted product specs:', specs.productType, specs.primaryColor);
+    return specs;
+  } catch (error) {
+    console.error('Product spec extraction failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Extract character specifications from uploaded image
+ */
+export const extractCharacterSpecs = async (imageData: string): Promise<CharacterSpecs | null> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash';
+
+    const cleanData = cleanDataUrl(imageData);
+    const mimeType = getMimeType(imageData);
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `Analyze this person/character image and extract detailed specifications for consistent regeneration.
+
+Return a JSON object with these fields:
+- gender: Male, Female, or Non-binary
+- ageRange: Estimated age range (e.g., "25-30")
+- ethnicity: For accurate representation
+- skinTone: Detailed description for consistency
+- hairColor: Specific color description
+- hairStyle: Style description (e.g., "Short curly afro", "Long straight blonde")
+- eyeColor: If visible
+- facialFeatures: Array of distinctive facial characteristics
+- bodyType: Physical build description
+- height: Relative height if determinable
+- distinctiveFeatures: Array of unique elements (tattoos, piercings, glasses, scars)
+- clothing: Current outfit description if visible
+- promptSnippet: A detailed prompt snippet that would regenerate this exact person
+
+Focus on details that ensure identity consistency across multiple generations.`
+            },
+            {
+              inlineData: { data: cleanData, mimeType }
+            }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            gender: { type: Type.STRING },
+            ageRange: { type: Type.STRING },
+            ethnicity: { type: Type.STRING },
+            skinTone: { type: Type.STRING },
+            hairColor: { type: Type.STRING },
+            hairStyle: { type: Type.STRING },
+            eyeColor: { type: Type.STRING },
+            facialFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
+            bodyType: { type: Type.STRING },
+            height: { type: Type.STRING },
+            distinctiveFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
+            clothing: { type: Type.STRING },
+            promptSnippet: { type: Type.STRING }
+          }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+
+    const specs = JSON.parse(text) as CharacterSpecs;
+    console.log('🔍 Extracted character specs:', specs.gender, specs.ageRange, specs.hairStyle);
+    return specs;
+  } catch (error) {
+    console.error('Character spec extraction failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Extract location specifications from uploaded image
+ */
+export const extractLocationSpecs = async (imageData: string): Promise<LocationSpecs | null> => {
+  try {
+    const ai = await getClient();
+    const model = 'gemini-2.5-flash';
+
+    const cleanData = cleanDataUrl(imageData);
+    const mimeType = getMimeType(imageData);
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `Analyze this location/environment image and extract detailed specifications.
+
+Return a JSON object with these fields:
+- locationType: Type of location (e.g., "Urban street", "Beach", "Basketball court")
+- architectureStyle: Architectural style if applicable
+- era: Time period feel (e.g., "Contemporary", "1980s", "Futuristic")
+- dominantColors: Array of main colors with hex codes
+- lightingSituation: Lighting description (e.g., "Golden hour natural light", "Neon signs at night")
+- atmosphere: Overall mood/feel of the location
+- keyElements: Array of distinctive visual elements
+- weatherConditions: If visible/determinable
+- timeOfDay: If determinable from lighting
+- realWorldLocation: If this is a recognizable real-world location
+- promptSnippet: A detailed prompt snippet that would regenerate this exact environment
+
+Focus on atmospheric and visual details for consistent regeneration.`
+            },
+            {
+              inlineData: { data: cleanData, mimeType }
+            }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            locationType: { type: Type.STRING },
+            architectureStyle: { type: Type.STRING },
+            era: { type: Type.STRING },
+            dominantColors: { type: Type.ARRAY, items: { type: Type.STRING } },
+            lightingSituation: { type: Type.STRING },
+            atmosphere: { type: Type.STRING },
+            keyElements: { type: Type.ARRAY, items: { type: Type.STRING } },
+            weatherConditions: { type: Type.STRING },
+            timeOfDay: { type: Type.STRING },
+            realWorldLocation: { type: Type.STRING },
+            promptSnippet: { type: Type.STRING }
+          }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+
+    const specs = JSON.parse(text) as LocationSpecs;
+    console.log('🔍 Extracted location specs:', specs.locationType, specs.atmosphere);
+    return specs;
+  } catch (error) {
+    console.error('Location spec extraction failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Convert extracted specs to enhanced prompt snippet
+ */
+export const specsToPromptSnippet = (
+  specs: ProductSpecs | CharacterSpecs | LocationSpecs,
+  type: 'product' | 'character' | 'location'
+): string => {
+  if (type === 'product') {
+    const p = specs as ProductSpecs;
+    return `${p.productType}${p.brand ? ` by ${p.brand}` : ''}${p.modelName ? ` (${p.modelName})` : ''}, ${p.primaryColor}, ${p.materials.join(' and ')} construction, ${p.finishes.join('/')} finish${p.distinctiveFeatures.length > 0 ? `, featuring ${p.distinctiveFeatures.join(', ')}` : ''}`;
+  }
+
+  if (type === 'character') {
+    const c = specs as CharacterSpecs;
+    return `${c.gender}, ${c.ageRange} years old, ${c.ethnicity || ''} ${c.skinTone} skin, ${c.hairStyle} ${c.hairColor} hair, ${c.bodyType} build${c.distinctiveFeatures.length > 0 ? `, with ${c.distinctiveFeatures.join(', ')}` : ''}`;
+  }
+
+  if (type === 'location') {
+    const l = specs as LocationSpecs;
+    return `${l.locationType}${l.architectureStyle ? `, ${l.architectureStyle} architecture` : ''}, ${l.atmosphere} atmosphere, ${l.lightingSituation}${l.keyElements.length > 0 ? `, featuring ${l.keyElements.join(', ')}` : ''}`;
+  }
+
+  return specs.promptSnippet;
+};
+
+// ============================================
+// PHOTO-TO-CHARACTER STYLIZATION
+// ============================================
+
+export interface PhotoToCharacterResult {
+  stylizedImage: string;           // Base64 of generated stylized character
+  extractedSpecs: CharacterSpecs;  // Specs extracted from original photo
+  characterProfile: CharacterProfile; // Ready-to-use character profile
+}
+
+/**
+ * Generate a stylized character from a real person photo using a locked-in style
+ *
+ * This combines:
+ * 1. Character specs extraction from the real person photo
+ * 2. Style DNA from the project default style
+ * 3. Image generation with both references
+ */
+export const generateStylizedCharacterFromPhoto = async (
+  realPhoto: string,               // Base64 of real person photo
+  styleDNA: StyleDNA,              // Style to apply (from ProjectDefaultStyle)
+  styleReferenceImage: string,     // Base64 of style reference image
+  characterName: string,
+  config: GenerationConfig = { aspectRatio: '1:1', resolution: '2K' }
+): Promise<PhotoToCharacterResult> => {
+
+  console.log('🎨 Starting Photo-to-Character stylization for:', characterName);
+
+  // Step 1: Extract specs from the real person photo
+  console.log('📸 Extracting character specs from photo...');
+  const extractedSpecs = await extractCharacterSpecs(realPhoto);
+
+  if (!extractedSpecs) {
+    throw new Error('Failed to extract character specs from photo');
+  }
+
+  console.log('✅ Specs extracted:', extractedSpecs.gender, extractedSpecs.ageRange, extractedSpecs.hairStyle);
+
+  // Step 2: Build the stylization prompt
+  const stylizationPrompt = buildPhotoToCharacterPrompt(extractedSpecs, styleDNA, characterName);
+
+  // Step 3: Generate the stylized character
+  console.log('🖼️ Generating stylized character...');
+
+  const ai = await getClient();
+  const model = 'gemini-3-pro-image-preview';
+
+  const cleanPhotoData = cleanDataUrl(realPhoto);
+  const photoMimeType = getMimeType(realPhoto);
+  const cleanStyleData = cleanDataUrl(styleReferenceImage);
+  const styleMimeType = getMimeType(styleReferenceImage);
+
+  // Build parts with both reference images
+  const parts: Part[] = [
+    { text: stylizationPrompt },
+    {
+      text: `\n\n[REFERENCE 1 - PERSON TO STYLIZE - Maintain their identity, face shape, features]\n`
+    },
+    {
+      inlineData: { data: cleanPhotoData, mimeType: photoMimeType }
+    },
+    {
+      text: `\n\n[REFERENCE 2 - TARGET STYLE - Apply this exact visual style]\n`
+    },
+    {
+      inlineData: { data: cleanStyleData, mimeType: styleMimeType }
+    }
+  ];
+
+  // Resolution config
+  const resolutionMap: Record<string, string> = {
+    '1K': '1024x1024',
+    '2K': '2048x2048',
+    '4K': '4096x4096'
+  };
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ role: 'user', parts }],
+    config: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      imageConfig: {
+        imageSize: config.resolution,
+        aspectRatio: config.aspectRatio
+      }
+    }
+  });
+
+  // Extract the generated image
+  let stylizedImage = '';
+
+  if (response.candidates && response.candidates[0]?.content?.parts) {
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData?.data) {
+        const mimeType = part.inlineData.mimeType || 'image/png';
+        stylizedImage = `data:${mimeType};base64,${part.inlineData.data}`;
+        break;
+      }
+    }
+  }
+
+  if (!stylizedImage) {
+    throw new Error('No image was generated');
+  }
+
+  console.log('✅ Stylized character generated successfully');
+
+  // Step 4: Create the character profile
+  const characterProfile: CharacterProfile = {
+    id: crypto.randomUUID(),
+    name: characterName,
+    description: `Stylized character based on real person reference. ${styleDNA.promptSnippet}`,
+    imageRefs: [stylizedImage],
+    promptSnippet: extractedSpecs.promptSnippet,
+    consistencyAnchors: extractedSpecs.distinctiveFeatures?.join(', ') || '',
+    extractedSpecs: extractedSpecs,
+    sourcePhoto: realPhoto,
+    generatedFromPhoto: true,
+    refCoverage: {
+      face: [stylizedImage]
+    }
+  };
+
+  return {
+    stylizedImage,
+    extractedSpecs,
+    characterProfile
+  };
+};
+
+/**
+ * Build an optimized prompt for photo-to-character stylization
+ */
+const buildPhotoToCharacterPrompt = (
+  specs: CharacterSpecs,
+  styleDNA: StyleDNA,
+  characterName: string
+): string => {
+  return `PHOTO-TO-STYLIZED CHARACTER TRANSFORMATION
+
+CHARACTER NAME: ${characterName}
+
+=== TASK ===
+Transform the person in REFERENCE 1 into a stylized character matching the visual style of REFERENCE 2.
+This is NOT a simple filter - you must RE-CREATE the person as a stylized character while maintaining their recognizable identity.
+
+=== PERSON IDENTITY (PRESERVE THESE FROM REFERENCE 1) ===
+- Gender: ${specs.gender}
+- Age: ${specs.ageRange}
+- Face shape and proportions: CRITICAL - maintain recognizability
+- Hair: ${specs.hairColor}, ${specs.hairStyle}
+- Skin tone: ${specs.skinTone}
+- Body type: ${specs.bodyType}
+- Distinctive features: ${specs.distinctiveFeatures?.join(', ') || 'None specified'}
+${specs.eyeColor ? `- Eye color: ${specs.eyeColor}` : ''}
+
+=== VISUAL STYLE (APPLY FROM REFERENCE 2) ===
+${styleDNA.promptSnippet}
+
+Style characteristics:
+- Color palette: ${styleDNA.colorPalette?.join(', ') || 'Match reference'}
+- Lighting: ${styleDNA.lightingCharacteristics || 'Match reference'}
+- Photographic style: ${styleDNA.photographicStyle || 'Stylized 3D'}
+- Mood: ${styleDNA.moodKeywords?.join(', ') || 'Match reference'}
+${styleDNA.compositionPatterns?.length > 0 ? `- Composition: ${styleDNA.compositionPatterns.join(', ')}` : ''}
+
+=== OUTPUT REQUIREMENTS ===
+1. Full body character portrait, facing camera
+2. Clean background (neutral or simple gradient)
+3. Professional character design quality
+4. The person should be INSTANTLY RECOGNIZABLE but rendered in the target style
+5. Include nice footwear/shoes appropriate to the style
+6. Studio-quality lighting consistent with the style reference
+
+=== CRITICAL ===
+- Do NOT make a photorealistic image
+- Do NOT create a generic character - this must look like THE SPECIFIC PERSON
+- Apply the EXACT style from Reference 2 (rendering technique, lighting, colors)
+- Maintain facial feature proportions for identity recognition`;
+};
+
+/**
+ * Extract StyleDNA from a single reference image for locking in as project default
+ */
+export const extractStyleDNAFromImage = async (imageData: string): Promise<StyleDNA> => {
+  console.log('🎨 Extracting Style DNA from reference image...');
+
+  const ai = await getClient();
+  const model = 'gemini-2.5-flash';
+
+  const cleanData = cleanDataUrl(imageData);
+  const mimeType = getMimeType(imageData);
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            text: `Analyze this image and extract its visual style DNA for consistent character generation.
+
+Focus on the RENDERING STYLE and VISUAL AESTHETIC, not the content.
+
+Return a JSON object with these fields:
+- colorPalette: Array of 4-6 dominant colors as hex codes
+- lightingCharacteristics: Description of lighting approach (e.g., "soft diffuse lighting with rim highlights")
+- compositionPatterns: Array of composition techniques used
+- moodKeywords: Array of 3-5 mood/atmosphere words
+- photographicStyle: Single term (e.g., "Stylized 3D", "Cel-shaded", "Hyperrealistic", "Pixar-style")
+- promptSnippet: A 2-3 sentence description that captures this EXACT visual style for regeneration. Be very specific about the rendering technique, lighting, and aesthetic.
+
+Example promptSnippet: "Rendered in a stylized 3D animation style with soft diffuse lighting and subtle cartoon elements. Clean lines with smooth shading, reminiscent of modern animated films. Warm color palette with soft shadows."
+
+Be VERY specific and technical in your analysis.`
+          },
+          {
+            inlineData: { data: cleanData, mimeType }
+          }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          colorPalette: { type: Type.ARRAY, items: { type: Type.STRING } },
+          lightingCharacteristics: { type: Type.STRING },
+          compositionPatterns: { type: Type.ARRAY, items: { type: Type.STRING } },
+          moodKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+          photographicStyle: { type: Type.STRING },
+          promptSnippet: { type: Type.STRING }
+        }
+      }
+    }
+  });
+
+  const text = response.text;
+  if (!text) {
+    throw new Error('Failed to extract style DNA');
+  }
+
+  const parsed = JSON.parse(text);
+
+  const styleDNA: StyleDNA = {
+    ...parsed,
+    generatedAt: Date.now()
+  };
+
+  console.log('✅ Style DNA extracted:', styleDNA.photographicStyle, '-', styleDNA.promptSnippet.substring(0, 50) + '...');
+
+  return styleDNA;
+};
+
+// ============================================
+// SCRIPT DIRECTOR FUNCTIONS
+// ============================================
+
+import { ScriptAnalysis, ExtractedEntity, AnalyzedBeat, ClarificationQuestion, CreativeInterpretation, Shot } from '../types';
+
+/**
+ * Analyze a messy script and extract structured data
+ * This is the CHAOS PARSER layer of the Script Director
+ */
+export const analyzeScriptWithDirector = async (
+  rawScript: string,
+  existingBibles?: {
+    characters: CharacterProfile[];
+    locations: LocationProfile[];
+    products: ProductProfile[];
+  }
+): Promise<Partial<ScriptAnalysis>> => {
+  console.log('🎬 Script Director: Analyzing script...');
+  const ai = await getClient();
+
+  const existingCharacterNames = existingBibles?.characters.map(c => c.name) || [];
+  const existingLocationNames = existingBibles?.locations.map(l => l.name).filter(Boolean) || [];
+  const existingProductNames = existingBibles?.products.map(p => p.name) || [];
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-05-20",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `You are a professional Script Director and DP (Director of Photography). Your job is to analyze messy, unstructured scripts and extract:
+
+1. ENTITIES (deduplicated):
+   - Characters: Find ALL character names, even scattered/inconsistent mentions. Consolidate duplicates ("Nicola b" and "Nicola B" = same person).
+   - Locations: Identify all settings, both literal (London pub) and metaphorical (mountain ridge).
+   - Products: Find key props and products mentioned.
+
+2. NARRATIVES:
+   - Detect if there are parallel narratives (e.g., literal UK journey + metaphorical trek).
+   - Identify if content is metaphorical vs literal.
+
+3. BEAT BREAKDOWN WITH SHOTS:
+   - Break the script into logical beats/scenes.
+   - For EACH beat, break it down into 3-8 SPECIFIC SHOTS with technical camera specifications.
+   - Convert vague directions ("Forrest Gump feather type thing") into specific shot sequences.
+
+4. CLARIFICATION QUESTIONS:
+   - Only ask about truly ambiguous items (entity disambiguation, sensitive content).
+   - Maximum 5 questions.
+
+EXISTING ENTITIES (match against these, don't duplicate):
+Characters: ${existingCharacterNames.join(', ') || 'None yet'}
+Locations: ${existingLocationNames.join(', ') || 'None yet'}
+Products: ${existingProductNames.join(', ') || 'None yet'}
+
+SCRIPT TO ANALYZE:
+---
+${rawScript}
+---
+
+Respond with structured JSON matching the schema.`
+          }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          entities: {
+            type: Type.OBJECT,
+            properties: {
+              characters: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    aliases: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    type: { type: Type.STRING },
+                    importance: { type: Type.STRING },
+                    appearances: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    inferredDescription: { type: Type.STRING },
+                    coverageNeeded: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                }
+              },
+              locations: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    aliases: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    type: { type: Type.STRING },
+                    importance: { type: Type.STRING },
+                    appearances: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    inferredDescription: { type: Type.STRING },
+                    coverageNeeded: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                }
+              },
+              products: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    aliases: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    type: { type: Type.STRING },
+                    importance: { type: Type.STRING },
+                    appearances: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    inferredDescription: { type: Type.STRING },
+                    coverageNeeded: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                }
+              }
+            }
+          },
+          narratives: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                type: { type: Type.STRING },
+                description: { type: Type.STRING },
+                beats: { type: Type.ARRAY, items: { type: Type.STRING } }
+              }
+            }
+          },
+          beats: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                sequence: { type: Type.NUMBER },
+                title: { type: Type.STRING },
+                originalText: { type: Type.STRING },
+                interpretedAction: { type: Type.STRING },
+                duration: { type: Type.NUMBER },
+                mood: { type: Type.STRING },
+                narrativeId: { type: Type.STRING },
+                entityUsage: {
+                  type: Type.OBJECT,
+                  properties: {
+                    characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    locations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    products: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                },
+                shots: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      sequence: { type: Type.NUMBER },
+                      description: { type: Type.STRING },
+                      shotSize: { type: Type.STRING },
+                      cameraAngle: { type: Type.STRING },
+                      cameraHeight: { type: Type.STRING },
+                      cameraMove: { type: Type.STRING },
+                      focalLength: { type: Type.STRING },
+                      duration: { type: Type.STRING },
+                      composition: {
+                        type: Type.OBJECT,
+                        properties: {
+                          foreground: { type: Type.STRING },
+                          midground: { type: Type.STRING },
+                          background: { type: Type.STRING },
+                          depthOfField: { type: Type.STRING },
+                          framing: { type: Type.STRING }
+                        }
+                      },
+                      lighting: {
+                        type: Type.OBJECT,
+                        properties: {
+                          timeOfDay: { type: Type.STRING },
+                          quality: { type: Type.STRING },
+                          direction: { type: Type.STRING },
+                          mood: { type: Type.STRING }
+                        }
+                      },
+                      entities: {
+                        type: Type.OBJECT,
+                        properties: {
+                          characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                          locations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                          products: { type: Type.ARRAY, items: { type: Type.STRING } }
+                        }
+                      },
+                      priority: { type: Type.STRING },
+                      transition: { type: Type.STRING },
+                      notes: { type: Type.STRING }
+                    }
+                  }
+                },
+                productionNotes: {
+                  type: Type.OBJECT,
+                  properties: {
+                    complexity: { type: Type.STRING },
+                    estimatedGenerations: { type: Type.NUMBER },
+                    dependencies: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    riskFactors: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
+                }
+              }
+            }
+          },
+          clarifications: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                type: { type: Type.STRING },
+                question: { type: Type.STRING },
+                context: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      label: { type: Type.STRING },
+                      description: { type: Type.STRING }
+                    }
+                  }
+                },
+                freeformAllowed: { type: Type.BOOLEAN },
+                required: { type: Type.BOOLEAN },
+                relatedEntityIds: { type: Type.ARRAY, items: { type: Type.STRING } }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const text = response.text;
+  if (!text) {
+    throw new Error('Failed to analyze script');
+  }
+
+  const parsed = JSON.parse(text);
+  console.log('✅ Script Director: Analysis complete -', parsed.beats?.length || 0, 'beats,', parsed.entities?.characters?.length || 0, 'characters');
+
+  return parsed as Partial<ScriptAnalysis>;
+};
+
+/**
+ * Generate shot breakdown for a single beat
+ */
+export const generateShotBreakdown = async (
+  beatDescription: string,
+  entityContext: {
+    characters: string[];
+    locations: string[];
+    products: string[];
+  },
+  style?: ProductionDesign
+): Promise<Shot[]> => {
+  console.log('🎬 Generating shot breakdown for beat:', beatDescription.substring(0, 50) + '...');
+  const ai = await getClient();
+
+  const styleContext = style ? `
+PRODUCTION DESIGN CONTEXT:
+- Visual Style: ${style.visualStyle || 'Not specified'}
+- Color Palette: ${style.colorPalette || 'Not specified'}
+- Lighting: ${style.lightingApproach || 'Not specified'}
+- Camera Language: ${style.cameraLanguage || 'Not specified'}
+` : '';
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-05-20",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `You are a professional Director of Photography breaking down a beat into specific, technical shots.
+
+Convert this beat description into 4-8 specific shots with full technical specifications.
+
+BEAT DESCRIPTION:
+${beatDescription}
+
+AVAILABLE ENTITIES:
+- Characters: ${entityContext.characters.join(', ') || 'None specified'}
+- Locations: ${entityContext.locations.join(', ') || 'None specified'}
+- Products: ${entityContext.products.join(', ') || 'None specified'}
+${styleContext}
+
+For each shot, specify:
+1. Shot size (ECU, CU, MCU, MS, MWS, WS, EWS)
+2. Camera angle (eye-level, high-angle, low-angle, overhead, dutch, birds-eye, worms-eye)
+3. Camera movement (static, dolly-in, dolly-out, pan, tracking, crane, orbit, handheld)
+4. Focal length (24mm wide, 35mm standard, 50mm normal, 85mm portrait, 135mm telephoto)
+5. Composition (foreground, midground, background, depth of field, framing)
+6. Lighting (time of day, quality, direction, mood)
+7. Duration (seconds)
+8. Which entities appear in the shot
+9. Director notes for the shot
+
+Respond with a JSON array of shots.`
+          }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            sequence: { type: Type.NUMBER },
+            description: { type: Type.STRING },
+            shotSize: { type: Type.STRING },
+            cameraAngle: { type: Type.STRING },
+            cameraHeight: { type: Type.STRING },
+            cameraMove: { type: Type.STRING },
+            focalLength: { type: Type.STRING },
+            duration: { type: Type.STRING },
+            composition: {
+              type: Type.OBJECT,
+              properties: {
+                foreground: { type: Type.STRING },
+                midground: { type: Type.STRING },
+                background: { type: Type.STRING },
+                depthOfField: { type: Type.STRING },
+                framing: { type: Type.STRING }
+              }
+            },
+            lighting: {
+              type: Type.OBJECT,
+              properties: {
+                timeOfDay: { type: Type.STRING },
+                quality: { type: Type.STRING },
+                direction: { type: Type.STRING },
+                mood: { type: Type.STRING }
+              }
+            },
+            entities: {
+              type: Type.OBJECT,
+              properties: {
+                characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                locations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                products: { type: Type.ARRAY, items: { type: Type.STRING } }
+              }
+            },
+            priority: { type: Type.STRING },
+            transition: { type: Type.STRING },
+            notes: { type: Type.STRING }
+          }
+        }
+      }
+    }
+  });
+
+  const text = response.text;
+  if (!text) {
+    throw new Error('Failed to generate shot breakdown');
+  }
+
+  const shots = JSON.parse(text) as Shot[];
+  console.log('✅ Generated', shots.length, 'shots for beat');
+
+  return shots;
+};
+
+/**
+ * Interpret vague creative direction into specific shots
+ * e.g., "Forrest Gump feather type thing" → specific tracking shot sequence
+ */
+export const interpretVagueDirection = async (
+  vagueInput: string,
+  context?: {
+    entityNames?: string[];
+    mood?: string;
+    style?: ProductionDesign;
+  }
+): Promise<CreativeInterpretation> => {
+  console.log('🎬 Interpreting creative direction:', vagueInput);
+  const ai = await getClient();
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-05-20",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `You are a professional Director of Photography who specializes in translating vague creative directions into specific, technical shot sequences.
+
+The director has given this vague direction:
+"${vagueInput}"
+
+Context:
+- Entities involved: ${context?.entityNames?.join(', ') || 'Not specified'}
+- Mood: ${context?.mood || 'Not specified'}
+- Style: ${context?.style?.visualStyle || 'Not specified'}
+
+Your job:
+1. Interpret what the director actually wants (what film reference? what visual effect? what emotional beat?)
+2. Create a specific shot sequence (3-6 shots) that achieves this creative vision
+3. Provide technical notes on how to achieve the look
+4. Suggest a reference style for generation
+
+Example interpretations:
+- "Forrest Gump feather type thing" → Magical realism tracking shot sequence with floating object, 4 shots (wide establishing, medium tracking, close detail, wide ascending)
+- "Charming, romantic vision" → Soft-focus, warm lighting, intimate framing, shallow DOF
+- "Gritty documentary feel" → Handheld, natural light, tight framing, desaturated
+
+Respond with JSON matching the schema.`
+          }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          originalInput: { type: Type.STRING },
+          interpretation: { type: Type.STRING },
+          technicalNotes: { type: Type.STRING },
+          referenceStyle: { type: Type.STRING },
+          mood: { type: Type.STRING },
+          estimatedDuration: { type: Type.NUMBER },
+          shotSequence: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                sequence: { type: Type.NUMBER },
+                description: { type: Type.STRING },
+                shotSize: { type: Type.STRING },
+                cameraAngle: { type: Type.STRING },
+                cameraMove: { type: Type.STRING },
+                duration: { type: Type.STRING },
+                notes: { type: Type.STRING }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const text = response.text;
+  if (!text) {
+    throw new Error('Failed to interpret creative direction');
+  }
+
+  const interpretation = JSON.parse(text) as CreativeInterpretation;
+  console.log('✅ Interpreted as:', interpretation.interpretation?.substring(0, 50) + '...');
+
+  return interpretation;
 };

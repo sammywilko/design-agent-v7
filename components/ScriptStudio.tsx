@@ -1,8 +1,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers, Images } from 'lucide-react';
-import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard } from '../types';
-import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar, analyzeCharacterFromImage } from '../services/gemini';
+import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers, Images, UserPlus, Clapperboard } from 'lucide-react';
+import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard, CharacterSpecs, LocationSpecs, ProductSpecs, ProjectDefaultStyle } from '../types';
+import PhotoToCharacterModal from './PhotoToCharacterModal';
+import ScriptDirectorModal from './ScriptDirectorModal';
+import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar, analyzeCharacterFromImage, generateTexturePack, generateLocationWithAtmosphere, generateBeatSheet, SceneBeat, TIME_OF_DAY_OPTIONS, WEATHER_OPTIONS, extractCharacterSpecs, extractLocationSpecs, extractProductSpecs } from '../services/gemini';
 import { db } from '../services/db';
 import ReactMarkdown from 'react-markdown';
 import VariantExplorer from './VariantExplorer';
@@ -71,6 +73,9 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
   // Auto-analyze character from uploaded image
   const [autoAnalyzingCharId, setAutoAnalyzingCharId] = useState<string | null>(null);
 
+  // AI Spec Extraction State (Intelligence Layer)
+  const [extractingSpecsFor, setExtractingSpecsFor] = useState<{id: string, type: 'character' | 'location' | 'product'} | null>(null);
+
   // Beat Editing State
   const [editingBeatId, setEditingBeatId] = useState<string | null>(null);
   const [editingBeatText, setEditingBeatText] = useState<string>('');
@@ -88,6 +93,10 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
   const [generatingSheetFor, setGeneratingSheetFor] = useState<string | null>(null);
   const [expandedSheetId, setExpandedSheetId] = useState<string | null>(null);
 
+  // Photo-to-Character State
+  const [showPhotoToCharacter, setShowPhotoToCharacter] = useState(false);
+  const [defaultStyle, setDefaultStyle] = useState<ProjectDefaultStyle | undefined>(savedData?.defaultStyle);
+
   // Expression Bank Generation State
   const [generatingExpressionFor, setGeneratingExpressionFor] = useState<string | null>(null);
   const [expandedExpressionId, setExpandedExpressionId] = useState<string | null>(null);
@@ -100,12 +109,19 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
   const [showBrainDumpModal, setShowBrainDumpModal] = useState(false);
   const [brainDumpText, setBrainDumpText] = useState('');
   const [processingBrainDump, setProcessingBrainDump] = useState(false);
+  const [generatingVisualBeatSheet, setGeneratingVisualBeatSheet] = useState(false);
+
+  // Script Director State
+  const [showScriptDirector, setShowScriptDirector] = useState(false);
 
   // Variant Explorer State
   const [exploringBeat, setExploringBeat] = useState<Beat | null>(null);
 
   // Coverage Pack Generator State
   const [coverageEntity, setCoverageEntity] = useState<{entity: CharacterProfile | LocationProfile | ProductProfile, type: EntityType} | null>(null);
+
+  // Texture Pack Generation State
+  const [generatingTexturesFor, setGeneratingTexturesFor] = useState<string | null>(null);
 
   // Debounce save logic
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,7 +155,7 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
       // Auto-save to DB after 1s of inactivity
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
-      const data: ScriptData = { content: scriptContent, beats, characters, locations, products, productionDesign };
+      const data: ScriptData = { content: scriptContent, beats, characters, locations, products, productionDesign, defaultStyle };
       const dataString = JSON.stringify(data);
 
       // Skip save if data hasn't actually changed
@@ -153,7 +169,7 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
       return () => {
           if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       };
-  }, [scriptContent, beats, characters, locations, products, productionDesign, saveData]);
+  }, [scriptContent, beats, characters, locations, products, productionDesign, defaultStyle, saveData]);
 
   // Handle incoming character from Stage 1
   useEffect(() => {
@@ -627,14 +643,94 @@ Generate 2-5 shots that tell this beat cinematically.`;
                           setAutoAnalyzingCharId(null);
                       }
                   }
+
+                  // Extract AI specs from first image (Intelligence Layer)
+                  if (results.length > 0 && char && !char.extractedSpecs) {
+                      setExtractingSpecsFor({ id: entityId, type: 'character' });
+                      try {
+                          const specs = await extractCharacterSpecs(results[0]);
+                          if (specs) {
+                              updateCharacter(entityId, 'extractedSpecs', specs);
+                              // Also update promptSnippet if not already set
+                              if (!char.promptSnippet) {
+                                  updateCharacter(entityId, 'promptSnippet', specs.promptSnippet);
+                              }
+                              showNotification(`Extracted specs for ${char.name}`);
+                          }
+                      } catch (err) {
+                          console.error('Character spec extraction failed:', err);
+                      } finally {
+                          setExtractingSpecsFor(null);
+                      }
+                  }
               } else if (entityType === 'location') {
                   const loc = locations.find(l => l.id === entityId);
                   const newRefs = append && loc?.imageRefs ? [...loc.imageRefs, ...results] : results;
                   updateLocation(entityId, 'imageRefs', newRefs);
+
+                  // Extract AI specs from first image (Intelligence Layer)
+                  if (results.length > 0 && loc && !loc.extractedSpecs) {
+                      setExtractingSpecsFor({ id: entityId, type: 'location' });
+                      try {
+                          const specs = await extractLocationSpecs(results[0]);
+                          if (specs) {
+                              updateLocation(entityId, 'extractedSpecs', specs);
+                              // Also update promptSnippet if not already set
+                              if (!loc.promptSnippet) {
+                                  updateLocation(entityId, 'promptSnippet', specs.promptSnippet);
+                              }
+                              // Auto-populate location-specific fields
+                              if (specs.timeOfDay && !loc.timeOfDay) {
+                                  updateLocation(entityId, 'timeOfDay', specs.timeOfDay);
+                              }
+                              if (specs.weatherConditions && !loc.weather) {
+                                  updateLocation(entityId, 'weather', specs.weatherConditions);
+                              }
+                              if (specs.architectureStyle && !loc.architecturalStyle) {
+                                  updateLocation(entityId, 'architecturalStyle', specs.architectureStyle);
+                              }
+                              if (specs.lightingSituation && !loc.lightingNotes) {
+                                  updateLocation(entityId, 'lightingNotes', specs.lightingSituation);
+                              }
+                              showNotification(`Extracted specs for ${loc.name}`);
+                          }
+                      } catch (err) {
+                          console.error('Location spec extraction failed:', err);
+                      } finally {
+                          setExtractingSpecsFor(null);
+                      }
+                  }
               } else {
                   const prod = products.find(p => p.id === entityId);
                   const newRefs = append && prod?.imageRefs ? [...prod.imageRefs, ...results] : results;
                   updateProduct(entityId, 'imageRefs', newRefs);
+
+                  // Extract AI specs from first image (Intelligence Layer)
+                  if (results.length > 0 && prod && !prod.extractedSpecs) {
+                      setExtractingSpecsFor({ id: entityId, type: 'product' });
+                      try {
+                          const specs = await extractProductSpecs(results[0]);
+                          if (specs) {
+                              updateProduct(entityId, 'extractedSpecs', specs);
+                              // Also update promptSnippet if not already set
+                              if (!prod.promptSnippet) {
+                                  updateProduct(entityId, 'promptSnippet', specs.promptSnippet);
+                              }
+                              // Auto-populate product-specific fields
+                              if (specs.productType && !prod.category) {
+                                  updateProduct(entityId, 'category', specs.productType);
+                              }
+                              if (specs.materials.length > 0 && !prod.materialNotes) {
+                                  updateProduct(entityId, 'materialNotes', specs.materials.join(', ') + (specs.finishes.length > 0 ? ` (${specs.finishes.join(', ')})` : ''));
+                              }
+                              showNotification(`Extracted specs for ${prod.name}`);
+                          }
+                      } catch (err) {
+                          console.error('Product spec extraction failed:', err);
+                      } finally {
+                          setExtractingSpecsFor(null);
+                      }
+                  }
               }
           });
       }
@@ -758,6 +854,27 @@ Generate 2-5 shots that tell this beat cinematically.`;
       }
   };
 
+  // Generate Texture Pack for Location
+  const handleGenerateTextures = async (locId: string) => {
+      const loc = locations.find(l => l.id === locId);
+      if (!loc) return;
+
+      setGeneratingTexturesFor(locId);
+      try {
+          const texturePrompt = `${loc.description} ${loc.weather || ''} ${loc.timeOfDay || ''}`.trim();
+          const textures = await generateTexturePack(texturePrompt);
+          if (textures && textures.length > 0) {
+              updateLocation(locId, 'textures', textures);
+              showNotification(`✅ Texture pack generated for ${loc.name}`);
+          }
+      } catch (error) {
+          console.error('Texture pack generation failed:', error);
+          showNotification('❌ Texture pack generation failed');
+      } finally {
+          setGeneratingTexturesFor(null);
+      }
+  };
+
   // Brain Dump Processing
   const processBrainDump = async () => {
       if (!brainDumpText.trim()) return;
@@ -843,6 +960,45 @@ ${brainDumpText}`;
       }
   };
 
+  // Generate Visual Beat Sheet with AI Images
+  const processVisualBeatSheet = async () => {
+      if (!brainDumpText.trim()) return;
+
+      setGeneratingVisualBeatSheet(true);
+      try {
+          const sceneBeats = await generateBeatSheet(brainDumpText);
+
+          if (sceneBeats && sceneBeats.length > 0) {
+              const newBeats: Beat[] = sceneBeats.map((beat: SceneBeat, i: number) => ({
+                  id: `beat-${Date.now()}-${i}`,
+                  visualSummary: beat.action,
+                  shotType: beat.recommendedShots?.[0] || 'MED',
+                  duration: '5s',
+                  mood: 'cinematic',
+                  characters: [],
+                  locations: [],
+                  products: [],
+                  status: beat.imageUrl ? 'generated' as BeatStatus : 'scripted' as BeatStatus,
+                  sequenceGrid: beat.imageUrl || undefined // Use sequenceGrid to store the generated image
+              }));
+
+              setBeats(prev => [...prev, ...newBeats]);
+              const withImages = newBeats.filter(b => b.sequenceGrid).length;
+              showNotification(`✅ Created ${newBeats.length} visual beats (${withImages} with images)`);
+              setShowBrainDumpModal(false);
+              setBrainDumpText('');
+              setActiveTab('beats');
+          } else {
+              throw new Error('No beats generated');
+          }
+      } catch (error) {
+          console.error('Visual beat sheet generation failed:', error);
+          showNotification('❌ Failed to generate visual beat sheet');
+      } finally {
+          setGeneratingVisualBeatSheet(false);
+      }
+  };
+
   const sendToDirector = async () => {
       if (!chatInput.trim()) return;
       const userMsg = { role: 'user' as const, content: chatInput };
@@ -869,6 +1025,51 @@ ${brainDumpText}`;
       }
   };
 
+  // Script Director Import Handler
+  const handleScriptDirectorImport = (data: {
+      beats: Beat[];
+      newCharacters: Partial<CharacterProfile>[];
+      newLocations: Partial<LocationProfile>[];
+      newProducts: Partial<ProductProfile>[];
+  }) => {
+      // Add new beats
+      setBeats(prev => [...prev, ...data.beats]);
+
+      // Add new characters (with defaults)
+      const fullCharacters: CharacterProfile[] = data.newCharacters.map(c => ({
+          id: c.id || crypto.randomUUID(),
+          name: c.name || 'Unnamed Character',
+          description: c.description || '',
+          promptSnippet: c.promptSnippet || c.description || '',
+          imageRefs: [],
+          refCoverage: { face: [], threeQuarter: [], fullBody: [], action: [] }
+      }));
+      setCharacters(prev => [...prev, ...fullCharacters]);
+
+      // Add new locations (with defaults)
+      const fullLocations: LocationProfile[] = data.newLocations.map(l => ({
+          id: l.id || crypto.randomUUID(),
+          name: l.name || 'Unnamed Location',
+          description: l.description || '',
+          promptSnippet: l.promptSnippet || l.description || '',
+          imageRefs: []
+      }));
+      setLocations(prev => [...prev, ...fullLocations]);
+
+      // Add new products (with defaults)
+      const fullProducts: ProductProfile[] = data.newProducts.map(p => ({
+          id: p.id || crypto.randomUUID(),
+          name: p.name || 'Unnamed Product',
+          description: p.description || '',
+          promptSnippet: p.promptSnippet || p.description || '',
+          imageRefs: []
+      }));
+      setProducts(prev => [...prev, ...fullProducts]);
+
+      // Switch to beats tab
+      setActiveTab('beats');
+  };
+
   return (
     <>
     <div className="flex-1 flex overflow-hidden min-w-0">
@@ -892,6 +1093,13 @@ ${brainDumpText}`;
                     <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-white tracking-tight">Script Input</h2>
                         <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => setShowScriptDirector(true)}
+                                className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all shadow-lg"
+                            >
+                                <Clapperboard className="w-4 h-4" />
+                                Script Director
+                            </button>
                             <button
                                 onClick={() => setShowBrainDumpModal(true)}
                                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all border border-zinc-700"
@@ -974,8 +1182,8 @@ Example:
                                 </button>
                                 <button
                                     onClick={processBrainDump}
-                                    disabled={processingBrainDump || !brainDumpText.trim()}
-                                    className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all"
+                                    disabled={processingBrainDump || generatingVisualBeatSheet || !brainDumpText.trim()}
+                                    className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all"
                                 >
                                     {processingBrainDump ? (
                                         <>
@@ -986,6 +1194,23 @@ Example:
                                         <>
                                             <Wand2 className="w-4 h-4" />
                                             Extract Beats
+                                        </>
+                                    )}
+                                </button>
+                                <button
+                                    onClick={processVisualBeatSheet}
+                                    disabled={generatingVisualBeatSheet || processingBrainDump || !brainDumpText.trim()}
+                                    className="bg-gradient-to-r from-amber-600 to-violet-600 hover:from-amber-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all shadow-lg"
+                                >
+                                    {generatingVisualBeatSheet ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            Generating Images...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ImageIcon className="w-4 h-4" />
+                                            Visual Beat Sheet
                                         </>
                                     )}
                                 </button>
@@ -1722,10 +1947,24 @@ Example:
             {/* CHARACTER BIBLE TAB */}
             {activeTab === 'characters' && (
                 <div className="flex-1 flex flex-col p-8 overflow-hidden">
-                    <h2 className="text-2xl font-bold text-white tracking-tight mb-6 flex items-center gap-3 shrink-0">
-                        <Users className="w-6 h-6 text-emerald-400"/>
-                        Character Bible
-                    </h2>
+                    <div className="flex items-center justify-between mb-6 shrink-0">
+                        <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
+                            <Users className="w-6 h-6 text-emerald-400"/>
+                            Character Bible
+                        </h2>
+                        <button
+                            onClick={() => setShowPhotoToCharacter(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-violet-500/20"
+                        >
+                            <Camera className="w-4 h-4" />
+                            <span className="text-sm">Create from Photo</span>
+                            {defaultStyle && (
+                                <span className="ml-1 px-1.5 py-0.5 bg-white/20 rounded text-[10px] flex items-center gap-1">
+                                    <Lock className="w-2.5 h-2.5" />
+                                </span>
+                            )}
+                        </button>
+                    </div>
                     <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-20 custom-scrollbar pr-2 content-start">
                         {/* Add Card */}
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
@@ -1806,6 +2045,48 @@ Example:
                                             <div className="flex items-center gap-2 p-2 bg-violet-500/10 border border-violet-500/30 rounded-lg">
                                                 <Loader2 className="w-4 h-4 text-violet-400 animate-spin"/>
                                                 <span className="text-xs text-violet-300">Analyzing image with Gemini Vision...</span>
+                                            </div>
+                                        )}
+
+                                        {/* Spec Extraction Loading Indicator */}
+                                        {extractingSpecsFor?.id === char.id && extractingSpecsFor?.type === 'character' && (
+                                            <div className="flex items-center gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                                                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin"/>
+                                                <span className="text-xs text-cyan-300">Extracting specs (Intelligence Layer)...</span>
+                                            </div>
+                                        )}
+
+                                        {/* Extracted AI Specs Display */}
+                                        {char.extractedSpecs && (
+                                            <div className="border border-cyan-500/20 rounded-lg p-3 bg-cyan-950/20 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-bold text-cyan-400 uppercase flex items-center gap-1">
+                                                        <Sparkles className="w-3 h-3"/> AI Extracted Specs
+                                                    </span>
+                                                    <button
+                                                        onClick={() => updateCharacter(char.id, 'extractedSpecs', undefined)}
+                                                        className="text-[9px] text-zinc-500 hover:text-red-400 transition-colors"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                                    <div><span className="text-zinc-500">Gender:</span> <span className="text-white">{char.extractedSpecs.gender}</span></div>
+                                                    <div><span className="text-zinc-500">Age:</span> <span className="text-white">{char.extractedSpecs.ageRange}</span></div>
+                                                    <div><span className="text-zinc-500">Skin:</span> <span className="text-white">{char.extractedSpecs.skinTone}</span></div>
+                                                    <div><span className="text-zinc-500">Build:</span> <span className="text-white">{char.extractedSpecs.bodyType}</span></div>
+                                                    <div className="col-span-2"><span className="text-zinc-500">Hair:</span> <span className="text-white">{char.extractedSpecs.hairStyle} {char.extractedSpecs.hairColor}</span></div>
+                                                    {char.extractedSpecs.distinctiveFeatures && char.extractedSpecs.distinctiveFeatures.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Distinctive:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {char.extractedSpecs.distinctiveFeatures.map((f, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300 rounded">{f}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
 
@@ -2366,6 +2647,59 @@ Example:
                                         <input type="file" id={`upload-loc-${loc.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, loc.id, 'location', true)} />
                                     </div>
                                     <div className="p-4 space-y-4">
+                                        {/* Spec Extraction Loading Indicator */}
+                                        {extractingSpecsFor?.id === loc.id && extractingSpecsFor?.type === 'location' && (
+                                            <div className="flex items-center gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                                                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin"/>
+                                                <span className="text-xs text-cyan-300">Extracting specs (Intelligence Layer)...</span>
+                                            </div>
+                                        )}
+
+                                        {/* Extracted AI Specs Display */}
+                                        {loc.extractedSpecs && (
+                                            <div className="border border-cyan-500/20 rounded-lg p-3 bg-cyan-950/20 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-bold text-cyan-400 uppercase flex items-center gap-1">
+                                                        <Sparkles className="w-3 h-3"/> AI Extracted Specs
+                                                    </span>
+                                                    <button
+                                                        onClick={() => updateLocation(loc.id, 'extractedSpecs', undefined)}
+                                                        className="text-[9px] text-zinc-500 hover:text-red-400 transition-colors"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                                    <div><span className="text-zinc-500">Type:</span> <span className="text-white">{loc.extractedSpecs.locationType}</span></div>
+                                                    <div><span className="text-zinc-500">Atmosphere:</span> <span className="text-white">{loc.extractedSpecs.atmosphere}</span></div>
+                                                    {loc.extractedSpecs.architectureStyle && (
+                                                        <div><span className="text-zinc-500">Style:</span> <span className="text-white">{loc.extractedSpecs.architectureStyle}</span></div>
+                                                    )}
+                                                    <div><span className="text-zinc-500">Lighting:</span> <span className="text-white">{loc.extractedSpecs.lightingSituation}</span></div>
+                                                    {loc.extractedSpecs.dominantColors && loc.extractedSpecs.dominantColors.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Colors:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {loc.extractedSpecs.dominantColors.map((c, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300 rounded">{c}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {loc.extractedSpecs.keyElements && loc.extractedSpecs.keyElements.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Key Elements:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {loc.extractedSpecs.keyElements.map((e, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-300 rounded">{e}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase">Description</label>
                                             <textarea value={loc.description} onChange={(e) => updateLocation(loc.id, 'description', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-blue-500 outline-none resize-none h-16 mt-1" placeholder="Detailed visual description of the environment..."/>
@@ -2373,12 +2707,41 @@ Example:
                                         <div className="grid grid-cols-2 gap-2">
                                             <div>
                                                 <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Sun className="w-3 h-3"/> Time of Day</label>
-                                                <input type="text" value={loc.timeOfDay || ''} onChange={(e) => updateLocation(loc.id, 'timeOfDay', e.target.value)} placeholder="Golden Hour..." className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-blue-500 outline-none mt-1"/>
+                                                <select
+                                                    value={loc.timeOfDay || ''}
+                                                    onChange={(e) => updateLocation(loc.id, 'timeOfDay', e.target.value)}
+                                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-blue-500 outline-none mt-1"
+                                                >
+                                                    <option value="">Select...</option>
+                                                    {TIME_OF_DAY_OPTIONS.map(opt => (
+                                                        <option key={opt} value={opt}>{opt}</option>
+                                                    ))}
+                                                </select>
                                             </div>
                                             <div>
                                                 <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Cloud className="w-3 h-3"/> Weather</label>
-                                                <input type="text" value={loc.weather || ''} onChange={(e) => updateLocation(loc.id, 'weather', e.target.value)} placeholder="Rainy, Fog..." className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-blue-500 outline-none mt-1"/>
+                                                <select
+                                                    value={loc.weather || ''}
+                                                    onChange={(e) => updateLocation(loc.id, 'weather', e.target.value)}
+                                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-blue-500 outline-none mt-1"
+                                                >
+                                                    <option value="">Select...</option>
+                                                    {WEATHER_OPTIONS.map(opt => (
+                                                        <option key={opt} value={opt}>{opt}</option>
+                                                    ))}
+                                                </select>
                                             </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-cyan-400 uppercase flex items-center gap-1"><MapPin className="w-3 h-3"/> Real Location (Google Grounding)</label>
+                                            <input
+                                                type="text"
+                                                value={loc.realLocation || ''}
+                                                onChange={(e) => updateLocation(loc.id, 'realLocation', e.target.value)}
+                                                placeholder="e.g. Shibuya Crossing, Tokyo..."
+                                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-cyan-300 focus:border-cyan-500 outline-none mt-1"
+                                            />
+                                            <p className="text-[8px] text-zinc-600 mt-1">Uses Google Search grounding to inform AI generation with real-world reference.</p>
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Sparkles className="w-3 h-3"/> AI Prompt Snippet</label>
@@ -2431,6 +2794,44 @@ Example:
                                                 </label>
                                             )}
                                             <p className="text-[9px] text-zinc-600 mt-1">Master plate ensures all beat generations match this exact environment.</p>
+                                        </div>
+
+                                        {/* Texture Pack Generator */}
+                                        <div className="bg-zinc-800/50 rounded-xl p-3 border border-zinc-700/50">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h4 className="text-[10px] font-bold text-purple-400 flex items-center gap-1.5">
+                                                    <Grid className="w-3 h-3"/>
+                                                    Texture Pack
+                                                </h4>
+                                                <button
+                                                    onClick={() => handleGenerateTextures(loc.id)}
+                                                    disabled={generatingTexturesFor === loc.id}
+                                                    className="px-2 py-1 bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 rounded text-[9px] font-bold flex items-center gap-1 transition-colors disabled:opacity-50"
+                                                >
+                                                    {generatingTexturesFor === loc.id ? (
+                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                    ) : (
+                                                        <Sparkles className="w-3 h-3" />
+                                                    )}
+                                                    Generate
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {[0, 1, 2].map((i) => (
+                                                    <div key={i} className="aspect-square bg-zinc-950 rounded border border-zinc-800 overflow-hidden">
+                                                        {loc.textures && loc.textures[i] ? (
+                                                            <img src={loc.textures[i]} alt={`Texture ${i+1}`} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <div className="w-full h-full flex items-center justify-center">
+                                                                <div className="w-1 h-1 bg-zinc-800 rounded-full" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="text-[8px] text-zinc-600 mt-2">
+                                                AI-generated surface textures matching your environment.
+                                            </p>
                                         </div>
 
                                         {/* Coverage Pack Generator */}
@@ -2522,6 +2923,68 @@ Example:
                                         <input type="file" id={`upload-prod-${prod.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, prod.id, 'product', true)} />
                                     </div>
                                     <div className="p-4 space-y-4">
+                                        {/* Spec Extraction Loading Indicator */}
+                                        {extractingSpecsFor?.id === prod.id && extractingSpecsFor?.type === 'product' && (
+                                            <div className="flex items-center gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                                                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin"/>
+                                                <span className="text-xs text-cyan-300">Extracting specs (Intelligence Layer)...</span>
+                                            </div>
+                                        )}
+
+                                        {/* Extracted AI Specs Display */}
+                                        {prod.extractedSpecs && (
+                                            <div className="border border-cyan-500/20 rounded-lg p-3 bg-cyan-950/20 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-bold text-cyan-400 uppercase flex items-center gap-1">
+                                                        <Sparkles className="w-3 h-3"/> AI Extracted Specs
+                                                    </span>
+                                                    <button
+                                                        onClick={() => updateProduct(prod.id, 'extractedSpecs', undefined)}
+                                                        className="text-[9px] text-zinc-500 hover:text-red-400 transition-colors"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                                    <div><span className="text-zinc-500">Type:</span> <span className="text-white">{prod.extractedSpecs.productType}</span></div>
+                                                    {prod.extractedSpecs.brand && (
+                                                        <div><span className="text-zinc-500">Brand:</span> <span className="text-white">{prod.extractedSpecs.brand}</span></div>
+                                                    )}
+                                                    <div><span className="text-zinc-500">Primary:</span> <span className="text-white">{prod.extractedSpecs.primaryColor}</span></div>
+                                                    {prod.extractedSpecs.secondaryColors && prod.extractedSpecs.secondaryColors.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Colors:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {prod.extractedSpecs.secondaryColors.map((c, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded">{c}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {prod.extractedSpecs.materials && prod.extractedSpecs.materials.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Materials:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {prod.extractedSpecs.materials.map((m, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300 rounded">{m}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {prod.extractedSpecs.distinctiveFeatures && prod.extractedSpecs.distinctiveFeatures.length > 0 && (
+                                                        <div className="col-span-2">
+                                                            <span className="text-zinc-500">Distinctive:</span>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {prod.extractedSpecs.distinctiveFeatures.map((f, i) => (
+                                                                    <span key={i} className="text-[9px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded">{f}</span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase">Description</label>
                                             <textarea value={prod.description} onChange={(e) => updateProduct(prod.id, 'description', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-amber-500 outline-none resize-none h-16 mt-1" placeholder="Visual description of the product..."/>
@@ -2692,6 +3155,32 @@ Example:
             }}
         />
     )}
+
+    {/* Photo-to-Character Modal */}
+    <PhotoToCharacterModal
+        isOpen={showPhotoToCharacter}
+        onClose={() => setShowPhotoToCharacter(false)}
+        defaultStyle={defaultStyle}
+        onSetDefaultStyle={setDefaultStyle}
+        onCharacterCreated={(character) => {
+            setCharacters(prev => [...prev, character]);
+            showNotification(`${character.name} added to Character Bible!`);
+        }}
+        showNotification={showNotification}
+    />
+
+    {/* Script Director Modal */}
+    <ScriptDirectorModal
+        isOpen={showScriptDirector}
+        onClose={() => setShowScriptDirector(false)}
+        existingBibles={{
+            characters,
+            locations,
+            products
+        }}
+        onImportComplete={handleScriptDirectorImport}
+        showNotification={showNotification}
+    />
     </>
   );
 };

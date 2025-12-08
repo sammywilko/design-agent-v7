@@ -2,7 +2,77 @@
 import { Project, Message, GeneratedImage, SavedEntity, GeneratedVideo, SavedPrompt, ScriptData, MoodBoard } from '../types';
 
 const DB_NAME = 'DesignAgentDB';
-const DB_VERSION = 6; // Incremented for Mood Boards
+const DB_VERSION = 7; // Incremented for Image Blobs
+
+// ============================================
+// IMAGE BLOB STORAGE UTILITIES
+// ============================================
+
+/**
+ * Convert base64 data URL to Blob for efficient storage
+ */
+const base64ToBlob = (base64: string): Blob => {
+    const parts = base64.split(',');
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binaryString = atob(parts[1]);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+};
+
+/**
+ * Convert Blob back to base64 data URL
+ */
+const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
+
+/**
+ * Generate a thumbnail from base64 image
+ */
+const generateThumbnailFromBase64 = (base64: string, maxWidth: number = 400): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ratio = Math.min(maxWidth / img.width, 1);
+            canvas.width = img.width * ratio;
+            canvas.height = img.height * ratio;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error('No canvas context')); return; }
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = base64;
+    });
+};
+
+/**
+ * Check if a URL is a base64 data URL
+ */
+const isBase64DataUrl = (url: string): boolean => {
+    return url.startsWith('data:image');
+};
+
+/**
+ * Get the approximate size of a base64 string in bytes
+ */
+const getBase64Size = (base64: string): number => {
+    const data = base64.split(',')[1] || base64;
+    return Math.round(data.length * 0.75);
+};
+
+// Threshold for blob storage (500KB) - images larger than this get stored as blobs
+const BLOB_STORAGE_THRESHOLD = 500 * 1024;
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -11,11 +81,11 @@ const openDB = (): Promise<IDBDatabase> => {
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      
+
       if (!db.objectStoreNames.contains('projects')) {
         db.createObjectStore('projects', { keyPath: 'id' });
       }
-      
+
       if (!db.objectStoreNames.contains('messages')) {
         const store = db.createObjectStore('messages', { keyPath: 'id' });
         store.createIndex('projectId', 'projectId', { unique: false });
@@ -63,6 +133,11 @@ const openDB = (): Promise<IDBDatabase> => {
           const store = db.createObjectStore('moodboards', { keyPath: 'id' });
           store.createIndex('projectId', 'projectId', { unique: false });
       }
+
+      // NEW: Image Blobs Store for optimized storage
+      if (!db.objectStoreNames.contains('imageBlobs')) {
+          db.createObjectStore('imageBlobs', { keyPath: 'id' });
+      }
     };
   });
 };
@@ -91,7 +166,7 @@ export const db = {
 
   deleteProject: async (id: string): Promise<void> => {
     const db = await openDB();
-    const tx = db.transaction(['projects', 'messages', 'history', 'library', 'videos', 'prompts', 'scripts', 'locations', 'products', 'moodboards'], 'readwrite');
+    const tx = db.transaction(['projects', 'messages', 'history', 'library', 'videos', 'prompts', 'scripts', 'locations', 'products', 'moodboards', 'imageBlobs'], 'readwrite');
     
     tx.objectStore('projects').delete(id);
     
@@ -344,5 +419,122 @@ export const db = {
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
       });
+  },
+
+  // ============================================
+  // IMAGE BLOB STORAGE METHODS
+  // ============================================
+
+  /**
+   * Store an image with optimized blob storage for large images.
+   * Images > 500KB are stored as blobs with thumbnails.
+   * Returns the image with thumbnail URL for display.
+   */
+  saveImageOptimized: async (image: GeneratedImage): Promise<GeneratedImage> => {
+      const db = await openDB();
+
+      // Check if image is large enough to warrant blob storage
+      if (isBase64DataUrl(image.url) && getBase64Size(image.url) > BLOB_STORAGE_THRESHOLD) {
+          try {
+              // Generate thumbnail for display
+              const thumbnail = await generateThumbnailFromBase64(image.url, 400);
+
+              // Convert full image to blob for storage
+              const blob = base64ToBlob(image.url);
+
+              // Store blob separately
+              const blobTx = db.transaction('imageBlobs', 'readwrite');
+              blobTx.objectStore('imageBlobs').put({
+                  id: image.id,
+                  blob: blob,
+                  originalSize: getBase64Size(image.url)
+              });
+
+              await new Promise<void>((resolve, reject) => {
+                  blobTx.oncomplete = () => resolve();
+                  blobTx.onerror = () => reject(blobTx.error);
+              });
+
+              // Store image metadata with thumbnail (not full image)
+              const optimizedImage: GeneratedImage = {
+                  ...image,
+                  url: thumbnail,  // Use thumbnail for display
+                  thumbnail: thumbnail,
+                  hasBlobStorage: true  // Flag to indicate blob storage
+              };
+
+              return optimizedImage;
+          } catch (e) {
+              console.warn('Failed to optimize image storage, using original:', e);
+              return image;
+          }
+      }
+
+      return image;
+  },
+
+  /**
+   * Retrieve the full-resolution image from blob storage
+   */
+  getFullResolutionImage: async (imageId: string): Promise<string | null> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('imageBlobs', 'readonly');
+          const store = tx.objectStore('imageBlobs');
+          const request = store.get(imageId);
+
+          request.onsuccess = async () => {
+              const result = request.result;
+              if (result?.blob) {
+                  try {
+                      const base64 = await blobToBase64(result.blob);
+                      resolve(base64);
+                  } catch {
+                      resolve(null);
+                  }
+              } else {
+                  resolve(null);
+              }
+          };
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  /**
+   * Delete an image blob
+   */
+  deleteImageBlob: async (imageId: string): Promise<void> => {
+      const db = await openDB();
+      const tx = db.transaction('imageBlobs', 'readwrite');
+      tx.objectStore('imageBlobs').delete(imageId);
+      return new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
+  },
+
+  /**
+   * Get storage statistics
+   */
+  getStorageStats: async (): Promise<{ blobCount: number; estimatedSize: number }> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('imageBlobs', 'readonly');
+          const store = tx.objectStore('imageBlobs');
+          const request = store.getAll();
+
+          request.onsuccess = () => {
+              const blobs = request.result || [];
+              const estimatedSize = blobs.reduce((sum, b) => sum + (b.originalSize || 0), 0);
+              resolve({
+                  blobCount: blobs.length,
+                  estimatedSize
+              });
+          };
+          request.onerror = () => reject(request.error);
+      });
   }
 };
+
+// Export utilities for use elsewhere
+export { isBase64DataUrl, getBase64Size, base64ToBlob, blobToBase64 };

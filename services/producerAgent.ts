@@ -267,10 +267,10 @@ export interface ProducerAppContext {
 // TOOL EXECUTOR
 // ============================================
 
-export interface ToolResult {
+export interface ToolResult<T = unknown> {
     success: boolean;
     message: string;
-    data?: any;
+    data?: T;
     needsConfirmation?: boolean;
     confirmationMessage?: string;
 }

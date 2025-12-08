@@ -25,6 +25,7 @@ import {
     uploadString,
     getDownloadURL
 } from 'firebase/storage';
+import { ScriptData, MoodBoard, GeneratedImage } from '../types';
 
 // Firebase configuration - uses Vite env vars
 const firebaseConfig = {
@@ -148,9 +149,9 @@ export const generateCollaboratorId = (): { id: string; color: string } => {
  */
 export const createSharedProject = async (
     projectId: string,
-    scriptData: any,
-    moodBoards: any[],
-    globalHistory: any[]
+    scriptData: ScriptData,
+    moodBoards: MoodBoard[],
+    globalHistory: GeneratedImage[]
 ): Promise<string | null> => {
     const firestore = getDb();
     if (!firestore) return null;
@@ -179,9 +180,9 @@ export const createSharedProject = async (
  * Load a shared project
  */
 export const loadSharedProject = async (projectId: string): Promise<{
-    scriptData: any;
-    moodBoards: any[];
-    globalHistory: any[];
+    scriptData: ScriptData;
+    moodBoards: MoodBoard[];
+    globalHistory: GeneratedImage[];
 } | null> => {
     const firestore = getDb();
     if (!firestore) return null;
@@ -213,9 +214,9 @@ export const loadSharedProject = async (projectId: string): Promise<{
 export const updateSharedProject = async (
     projectId: string,
     updates: {
-        scriptData?: any;
-        moodBoards?: any[];
-        globalHistory?: any[];
+        scriptData?: ScriptData;
+        moodBoards?: MoodBoard[];
+        globalHistory?: GeneratedImage[];
     },
     collaboratorId?: string
 ): Promise<boolean> => {
@@ -257,9 +258,9 @@ export const updateSharedProject = async (
 export const subscribeToProject = (
     projectId: string,
     onUpdate: (data: {
-        scriptData: any;
-        moodBoards: any[];
-        globalHistory: any[];
+        scriptData: ScriptData;
+        moodBoards: MoodBoard[];
+        globalHistory: GeneratedImage[];
         lastEditedBy?: string;
         updatedAt?: Date;
     }) => void,

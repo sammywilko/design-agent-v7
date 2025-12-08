@@ -143,7 +143,7 @@ export interface VariantMetadata {
 export interface GeneratedImage {
   id: string;
   projectId: string; // Database Index
-  url: string; // Base64 data URL (full resolution)
+  url: string; // Base64 data URL (full resolution) or thumbnail if blob stored
   thumbnail?: string; // Compressed thumbnail for UI display
   prompt: string;
   aspectRatio: string;
@@ -152,6 +152,7 @@ export interface GeneratedImage {
   version?: number; // Version number for this beat's generations
   userRating?: 1 | 2 | 3 | 4 | 5; // User rating for comparison
   variantMetadata?: VariantMetadata; // NEW: For variant exploration
+  hasBlobStorage?: boolean; // True if full-res image stored as blob in IndexedDB
 }
 
 // Version history for beat generations
@@ -203,6 +204,48 @@ export interface Shot {
     duration?: string;        // "2s", "3s"
     notes?: string;           // Director notes
     generatedImageId?: string; // Link to generated image for this shot
+
+    // === SCRIPT DIRECTOR ENHANCED FIELDS ===
+    sequence?: number;        // Order within beat (1, 2, 3...)
+
+    // Technical camera specs
+    cameraAngle?: 'eye-level' | 'high-angle' | 'low-angle' | 'overhead' | 'dutch' | 'birds-eye' | 'worms-eye';
+    cameraHeight?: string;    // "5.5ft", "200ft aerial", "ground level"
+    focalLength?: string;     // "24mm wide", "85mm portrait", "200mm telephoto"
+
+    // Composition
+    composition?: {
+        foreground?: string;
+        midground?: string;
+        background?: string;
+        depthOfField?: 'shallow' | 'medium' | 'deep';
+        framing?: string;     // "rule of thirds left", "centered", "negative space right"
+    };
+
+    // Lighting
+    lighting?: {
+        timeOfDay?: string;       // "golden hour", "blue hour", "midday", "night"
+        quality?: string;         // "soft diffused", "harsh directional", "ambient"
+        direction?: string;       // "backlit", "side-lit", "front-lit", "rim-lit"
+        mood?: string;            // "dramatic", "romantic", "mysterious"
+        practicals?: string[];    // ["neon signs", "streetlamps", "firelight"]
+    };
+
+    // Entity references (by NAME for @mention pattern)
+    entities?: {
+        characters?: string[];    // Character names appearing in shot
+        locations?: string[];     // Location names
+        products?: string[];      // Product names
+    };
+
+    // Generation
+    generationPrompt?: string;    // Full AI-ready prompt for this shot
+    styleReferences?: string[];   // Reference image URLs/IDs to attach
+
+    // Metadata
+    priority?: 'critical' | 'high' | 'medium' | 'low';
+    transition?: 'cut' | 'fade' | 'dissolve' | 'match-cut' | 'wipe';
+    transitionNotes?: string;     // "Match cut on napkin shape to map"
 }
 
 export interface Beat {
@@ -268,6 +311,12 @@ export interface CharacterProfile {
             neutral?: string;
         };
     };
+    // AI-Extracted Specifications (Intelligence Layer)
+    extractedSpecs?: CharacterSpecs;
+    // Photo-to-Character Source Tracking
+    sourcePhoto?: string;             // Original real person photo (Base64)
+    styleApplied?: string;            // ID of ProjectDefaultStyle used
+    generatedFromPhoto?: boolean;     // Flag for photo-derived characters
 }
 
 // NEW: Location Profile for World Bible
@@ -283,6 +332,10 @@ export interface LocationProfile {
     lightingNotes?: string;    // "Neon signs reflect on wet pavement"
     architecturalStyle?: string; // "Brutalist", "Art Deco", "Cyberpunk"
     anchorImage?: string;      // Base64 master plate image
+    realLocation?: string;     // Google grounding: "Shibuya Crossing, Tokyo"
+    textures?: string[];       // Generated texture pack images
+    // AI-Extracted Specifications (Intelligence Layer)
+    extractedSpecs?: LocationSpecs;
 }
 
 // NEW: Product Profile for World Bible
@@ -297,6 +350,8 @@ export interface ProductProfile {
     materialNotes?: string;    // "Brushed aluminum, matte black rubber"
     brandGuidelines?: string;  // "Logo must be visible, red accent color"
     heroAngles?: string[];     // Preferred camera angles for this product
+    // AI-Extracted Specifications (Intelligence Layer)
+    extractedSpecs?: ProductSpecs;
 }
 
 export type FocalLength = '16mm' | '24mm' | '35mm' | '50mm' | '85mm' | '135mm' | '200mm';
@@ -328,6 +383,7 @@ export interface ScriptData {
     products: ProductProfile[];      // NEW
     productionDesign?: ProductionDesign;
     lookbook?: Lookbook;             // Visual DNA / Style Constitution
+    defaultStyle?: ProjectDefaultStyle; // Locked-in style for Photo-to-Character
 }
 
 // ============================================
@@ -372,4 +428,191 @@ export interface StyleDNA {
     photographicStyle: string;        // "Cinematic", "Editorial", "Documentary"
     promptSnippet: string;            // AI-generated prompt injection text
     generatedAt: number;
+}
+
+// Project Default Style - locked-in style for character generation
+export interface ProjectDefaultStyle {
+    id: string;
+    name: string;
+    referenceImage: string;           // Base64 of the style reference
+    styleDNA: StyleDNA;               // Extracted style characteristics
+    lockedAt: number;                 // Timestamp when locked
+    description?: string;             // User-provided description
+}
+
+// ============================================
+// AI SPEC EXTRACTION - INTELLIGENCE LAYER
+// ============================================
+
+/**
+ * Extracted product specifications from image analysis
+ */
+export interface ProductSpecs {
+    productType: string;        // "Sneaker", "Watch", "Bottle", etc.
+    brand?: string;             // Detected or inferred brand
+    modelName?: string;         // Specific model if identifiable
+    primaryColor: string;       // Main color with hex code
+    secondaryColors: string[];  // Additional colors with hex codes
+    materials: string[];        // ["Leather", "Rubber", "Mesh"]
+    finishes: string[];         // ["Matte", "Glossy", "Metallic"]
+    logoPlacement?: string;     // Where logos/branding appear
+    distinctiveFeatures: string[]; // Unique identifiable elements
+    dimensions?: string;        // Approximate size/proportions
+    promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+/**
+ * Extracted character specifications from image analysis
+ */
+export interface CharacterSpecs {
+    gender: string;
+    ageRange: string;           // "20-25", "35-40", etc.
+    ethnicity?: string;         // For accurate representation
+    skinTone: string;           // Description for consistency
+    hairColor: string;
+    hairStyle: string;
+    eyeColor?: string;
+    facialFeatures: string[];   // ["Angular jawline", "High cheekbones"]
+    bodyType: string;           // "Athletic", "Slim", "Muscular"
+    height?: string;            // "Tall", "Average", "Short"
+    distinctiveFeatures: string[]; // Tattoos, scars, glasses, etc.
+    clothing?: string;          // Current outfit description
+    promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+/**
+ * Extracted location specifications from image analysis
+ */
+export interface LocationSpecs {
+    locationType: string;       // "Urban street", "Beach", "Office"
+    architectureStyle?: string; // "Brutalist", "Art Deco", "Modern"
+    era?: string;               // "Contemporary", "1980s", "Futuristic"
+    dominantColors: string[];   // Main color palette with hex codes
+    lightingSituation: string;  // "Natural daylight", "Neon lights"
+    atmosphere: string;         // "Gritty", "Luxurious", "Industrial"
+    keyElements: string[];      // ["Graffiti walls", "Street lamps", "Wet pavement"]
+    weatherConditions?: string;
+    timeOfDay?: string;
+    realWorldLocation?: string; // If recognizable
+    promptSnippet: string;      // AI-generated prompt for regeneration
+}
+
+// ============================================
+// SCRIPT DIRECTOR SYSTEM
+// ============================================
+
+/**
+ * Result from Script Director analysis
+ */
+export interface ScriptAnalysis {
+    // Extracted entities (deduplicated)
+    entities: {
+        characters: ExtractedEntity[];
+        locations: ExtractedEntity[];
+        products: ExtractedEntity[];
+    };
+
+    // Narrative structure detection
+    narratives: {
+        id: string;
+        type: 'literal' | 'metaphorical' | 'parallel';
+        description: string;
+        beats: string[];  // Beat IDs belonging to this narrative
+    }[];
+
+    // Beat breakdown with shots
+    beats: AnalyzedBeat[];
+
+    // Production metadata
+    production: {
+        estimatedShots: number;
+        estimatedDuration: number;      // Total seconds
+        estimatedCost: number;          // $ based on generation count
+        criticalAssets: string[];       // Entity names that need generation first
+        assetDependencies: {            // What needs what
+            [assetName: string]: string[];  // e.g., "Millie dance shot" needs ["Millie turnaround", "Bridge location"]
+        };
+    };
+
+    // Questions for user (only critical ambiguities)
+    clarifications: ClarificationQuestion[];
+}
+
+/**
+ * Entity extracted from script analysis
+ */
+export interface ExtractedEntity {
+    id: string;
+    name: string;                       // Canonical name (deduplicated)
+    aliases: string[];                  // All variations found ("Nicola b", "Nicola B", "Nicola")
+    type: 'character' | 'location' | 'product';
+    importance: 'critical' | 'hero' | 'supporting' | 'background';
+    appearances: string[];              // Beat IDs where this entity appears
+    inferredDescription: string;        // AI-inferred visual description
+    coverageNeeded: string[];           // Recommended coverage packs
+    existingBibleMatch?: string;        // ID if matches existing Bible entry
+}
+
+/**
+ * Beat with shot-level breakdown
+ */
+export interface AnalyzedBeat {
+    id: string;
+    sequence: number;
+    title: string;                      // Short title for beat
+    originalText: string;               // Raw text from script
+    interpretedAction: string;          // AI-clarified action description
+    duration: number;                   // Seconds
+    mood: string;
+    narrativeId?: string;               // Which narrative thread
+
+    // Shot breakdown (the critical missing piece!)
+    shots: Shot[];
+
+    // Entity usage
+    entityUsage: {
+        characters: string[];           // Character NAMES
+        locations: string[];            // Location NAMES
+        products: string[];             // Product NAMES
+    };
+
+    // Production notes
+    productionNotes?: {
+        complexity: 'simple' | 'moderate' | 'complex';
+        estimatedGenerations: number;
+        dependencies: string[];         // What assets needed before this beat
+        riskFactors: string[];          // Potential issues
+    };
+}
+
+/**
+ * Question for user when script has ambiguities
+ */
+export interface ClarificationQuestion {
+    id: string;
+    type: 'entity-disambiguation' | 'visual-intent' | 'asset-source' | 'sensitivity' | 'narrative-structure';
+    question: string;
+    context: string;                    // Why we're asking
+    options?: {
+        id: string;
+        label: string;
+        description?: string;
+    }[];
+    freeformAllowed: boolean;
+    required: boolean;
+    relatedEntityIds?: string[];        // Which entities this affects
+    answer?: string;                    // User's answer (filled in later)
+}
+
+/**
+ * Creative direction interpretation result
+ */
+export interface CreativeInterpretation {
+    originalInput: string;              // "Forrest Gump feather type thing"
+    interpretation: string;             // "Magical realism tracking shot sequence with floating object"
+    shotSequence: Shot[];               // 4-5 specific shots that achieve this
+    technicalNotes: string;             // How to achieve the look
+    referenceStyle: string;             // Style description for generation
+    mood: string;
+    estimatedDuration: number;
 }

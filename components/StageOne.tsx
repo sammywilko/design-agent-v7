@@ -1,11 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Image as ImageIcon, Loader2, Sparkles, Upload, X, Settings, User, Save, Plus, Trash2, Library, Copy, ScanEye, Folder, ChevronDown, Globe, Film, Square, Star, BookOpen, Wand2, Zap, FileText, Palette } from 'lucide-react';
-import { consultDirector, generateImage, extractStyleDNA, enhancePrompt } from '../services/gemini';
+import { Send, Image as ImageIcon, Loader2, Sparkles, Upload, X, Settings, User, Save, Plus, Trash2, Library, Copy, ScanEye, Folder, ChevronDown, Globe, Film, Square, Star, BookOpen, Wand2, Zap, FileText, Palette, Grid, Info, Camera, Lightbulb, Layers, Sliders, Type } from 'lucide-react';
+import { consultDirector, generateImage, generateImageBatch, extractStyleDNA, enhancePrompt, analyzeProductionMetadata, BatchGenerationResult, ProductionMetadata } from '../services/gemini';
 import { db } from '../services/db';
 import { Message, GeneratedImage, DirectorResponse, AspectRatio, ImageResolution, ReferenceAsset, ReferenceType, SavedEntity, Campaign, Project, SavedPrompt, CharacterProfile, LocationProfile, ProductProfile, ProductionDesign } from '../types';
 import ReactMarkdown from 'react-markdown';
 import CoverageModal from './CoverageModal';
+import ContactSheetModal from './ContactSheetModal';
 
 interface StageOneProps {
   onImageSelect: (image: GeneratedImage) => void;
@@ -13,7 +14,7 @@ interface StageOneProps {
   onImageGenerated?: (images: GeneratedImage[]) => void;
   currentProject: Project;
   onLibraryUpdate: () => void;
-  incomingPrompt?: { prompt: string, refs: any[] } | null;
+  incomingPrompt?: { prompt: string, refs: ReferenceAsset[] } | null;
   onClearIncomingPrompt?: () => void;
   onSendToScript?: (image: GeneratedImage) => void;
   onSendToStoryboard?: (image: GeneratedImage) => void; // Quick add to storyboard
@@ -152,6 +153,9 @@ const StageOne: React.FC<StageOneProps> = ({
   const [showPowerTools, setShowPowerTools] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [lightboxMetadata, setLightboxMetadata] = useState<ProductionMetadata | null>(null);
+  const [isAnalyzingMetadata, setIsAnalyzingMetadata] = useState(false);
+  const [showMetadataPanel, setShowMetadataPanel] = useState(false);
   
   // Power Tool Modal State
   const [selectedTool, setSelectedTool] = useState<typeof NANO_POWER_TOOLS[0] | null>(null);
@@ -170,6 +174,7 @@ const StageOne: React.FC<StageOneProps> = ({
   const [customInstructions, setCustomInstructions] = useState('');
   
   const [showCoverageModal, setShowCoverageModal] = useState(false);
+  const [showContactSheetModal, setShowContactSheetModal] = useState(false);
   const [coverageSourceImage, setCoverageSourceImage] = useState<GeneratedImage | null>(null);
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([DEFAULT_CAMPAIGN]);
@@ -181,7 +186,17 @@ const StageOne: React.FC<StageOneProps> = ({
   const [processingRefId, setProcessingRefId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
-  
+
+  // Structured input mode state
+  const [inputMode, setInputMode] = useState<'simple' | 'structured'>('simple');
+  const [structuredInput, setStructuredInput] = useState({
+      subject: '',
+      action: '',
+      shotType: '',
+      lighting: '',
+      environment: ''
+  });
+
   const isCancelledRef = useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -442,8 +457,38 @@ const StageOne: React.FC<StageOneProps> = ({
           const enhanced = await enhancePrompt(input);
           setInput(enhanced);
           showNotification("Prompt Enhanced!");
-      } catch (e) { showNotification("Failed to enhance prompt."); } 
+      } catch (e) { showNotification("Failed to enhance prompt."); }
       finally { setIsEnhancing(false); }
+  };
+
+  const handleAnalyzeMetadata = async () => {
+      if (!lightboxImage) return;
+      setIsAnalyzingMetadata(true);
+      setShowMetadataPanel(true);
+      try {
+          const metadata = await analyzeProductionMetadata(lightboxImage);
+          setLightboxMetadata(metadata);
+          if (!metadata) showNotification("Could not analyze image metadata.");
+      } catch (e) {
+          console.error(e);
+          showNotification("Failed to analyze production metadata.");
+      } finally {
+          setIsAnalyzingMetadata(false);
+      }
+  };
+
+  const openLightbox = (imageUrl: string) => {
+      setLightboxImage(imageUrl);
+      setLightboxMetadata(null);
+      setShowMetadataPanel(false);
+      setIsLightboxOpen(true);
+  };
+
+  const closeLightbox = () => {
+      setIsLightboxOpen(false);
+      setLightboxImage(null);
+      setLightboxMetadata(null);
+      setShowMetadataPanel(false);
   };
 
   const runCoverageGeneration = async (config: { framing: string[], lenses: string[], angles: string[] }) => {
@@ -715,8 +760,29 @@ const StageOne: React.FC<StageOneProps> = ({
     return injectedRefs;
   };
 
+  // Build prompt from either simple or structured input mode
+  const getEffectivePrompt = (): string => {
+    if (inputMode === 'simple') {
+      return input;
+    }
+    // Build structured prompt
+    const parts: string[] = [];
+    if (structuredInput.subject.trim()) parts.push(`Subject: ${structuredInput.subject.trim()}`);
+    if (structuredInput.action.trim()) parts.push(`Action: ${structuredInput.action.trim()}`);
+    if (structuredInput.shotType.trim()) parts.push(`Shot: ${structuredInput.shotType.trim()}`);
+    if (structuredInput.lighting.trim()) parts.push(`Lighting: ${structuredInput.lighting.trim()}`);
+    if (structuredInput.environment.trim()) parts.push(`Environment: ${structuredInput.environment.trim()}`);
+    return parts.join('. ') + '.';
+  };
+
+  const hasStructuredContent = (): boolean => {
+    return !!(structuredInput.subject.trim() || structuredInput.action.trim() || structuredInput.shotType.trim() || structuredInput.lighting.trim() || structuredInput.environment.trim());
+  };
+
   const handleSend = async () => {
-    if ((!input.trim() && references.length === 0) || isProcessing) return;
+    const effectivePrompt = getEffectivePrompt();
+    const hasInput = inputMode === 'simple' ? input.trim() : hasStructuredContent();
+    if ((!hasInput && references.length === 0) || isProcessing) return;
 
     // Inject @mentioned references (characters, locations, products)
     const characterMentionRefs = parseAndInjectMentions();
@@ -752,18 +818,177 @@ const StageOne: React.FC<StageOneProps> = ({
       }
     }
 
-    // Clean @mentions from prompt and add character context
-    let processedPrompt = input;
-    const mentionedNames = (input.match(/@(\w+)/g) || []).map(m => m.slice(1));
+    // Clean @mentions from prompt and add character/location/product context
+    let processedPrompt = effectivePrompt;
+    const mentionedNames = (effectivePrompt.match(/@(\w+)/g) || []).map(m => m.slice(1));
     const safeChars = Array.isArray(bibleCharacters) ? bibleCharacters : [];
+    const safeLocs = Array.isArray(bibleLocations) ? bibleLocations : [];
+    const safeProds = Array.isArray(bibleProducts) ? bibleProducts : [];
 
+    // Find mentioned characters, locations, and products
+    const mentionedChars = mentionedNames.map(name =>
+      safeChars.find(c => c.name.toLowerCase() === name.toLowerCase())
+    ).filter(Boolean);
+
+    const mentionedLocs = mentionedNames.map(name =>
+      safeLocs.find(l => l.name.toLowerCase() === name.toLowerCase())
+    ).filter(Boolean);
+
+    const mentionedProds = mentionedNames.map(name =>
+      safeProds.find(p => p.name.toLowerCase() === name.toLowerCase())
+    ).filter(Boolean);
+
+    // Build context with composition guidance
     if (mentionedNames.length > 0) {
-      const charContexts = mentionedNames.map(name => {
-        const char = safeChars.find(c => c.name.toLowerCase() === name.toLowerCase());
-        if (char?.promptSnippet) return `[${char.name}: ${char.promptSnippet}]`;
-        return `[${name}]`;
-      }).join(' ');
-      processedPrompt = `${input}\n\nCharacter References: ${charContexts}`;
+      let contextParts: string[] = [];
+
+      // Character context - now includes extracted specs
+      if (mentionedChars.length > 0) {
+        const charContexts = mentionedChars.map(char => {
+          if (!char) return '';
+          let desc = `[${char.name}`;
+          // Use extracted specs if available, otherwise fall back to promptSnippet
+          if (char.extractedSpecs) {
+            const specs = char.extractedSpecs;
+            desc += `: ${specs.gender}, ${specs.ageRange}, ${specs.skinTone} skin, ${specs.hairStyle} ${specs.hairColor} hair, ${specs.bodyType} build`;
+            if (specs.distinctiveFeatures && specs.distinctiveFeatures.length > 0) {
+              desc += `, with ${specs.distinctiveFeatures.slice(0, 3).join(', ')}`;
+            }
+          } else if (char.promptSnippet) {
+            desc += `: ${char.promptSnippet}`;
+          }
+          desc += ']';
+          return desc;
+        }).filter(Boolean).join(' ');
+        contextParts.push(`Character References: ${charContexts}`);
+      }
+
+      // Location context - now includes extracted specs
+      if (mentionedLocs.length > 0) {
+        const locContexts = mentionedLocs.map(loc => {
+          if (!loc) return '';
+          let locDesc = `[${loc.name}`;
+          // Use extracted specs if available
+          if (loc.extractedSpecs) {
+            const specs = loc.extractedSpecs;
+            locDesc += `: ${specs.locationType}, ${specs.atmosphere} atmosphere, ${specs.lightingSituation}`;
+            if (specs.keyElements && specs.keyElements.length > 0) {
+              locDesc += `, featuring ${specs.keyElements.slice(0, 3).join(', ')}`;
+            }
+          } else if (loc.promptSnippet) {
+            locDesc += `: ${loc.promptSnippet}`;
+          }
+          if (loc.timeOfDay) locDesc += `, ${loc.timeOfDay}`;
+          if (loc.weather) locDesc += `, ${loc.weather}`;
+          locDesc += ']';
+          return locDesc;
+        }).filter(Boolean).join(' ');
+        contextParts.push(`Location References: ${locContexts}`);
+      }
+
+      // Product context - now includes extracted specs
+      if (mentionedProds.length > 0) {
+        const prodContexts = mentionedProds.map(prod => {
+          if (!prod) return '';
+          let prodDesc = `[${prod.name}`;
+          // Use extracted specs if available
+          if (prod.extractedSpecs) {
+            const specs = prod.extractedSpecs;
+            prodDesc += `: ${specs.productType}, ${specs.primaryColor}`;
+            if (specs.materials && specs.materials.length > 0) {
+              prodDesc += `, ${specs.materials.join(' & ')} construction`;
+            }
+            if (specs.distinctiveFeatures && specs.distinctiveFeatures.length > 0) {
+              prodDesc += `, featuring ${specs.distinctiveFeatures.slice(0, 2).join(', ')}`;
+            }
+          } else if (prod.promptSnippet) {
+            prodDesc += `: ${prod.promptSnippet}`;
+          }
+          prodDesc += ']';
+          return prodDesc;
+        }).filter(Boolean).join(' ');
+        contextParts.push(`Product References: ${prodContexts}`);
+      }
+
+      // CRITICAL: Add composition guidance when BOTH character AND location are mentioned
+      if (mentionedChars.length > 0 && mentionedLocs.length > 0) {
+        // Build detailed scene composition context
+        const charNames = mentionedChars.filter(Boolean).map(c => c!.name).join(', ');
+        const locNames = mentionedLocs.filter(Boolean).map(l => l!.name).join(', ');
+
+        // Detect location type for scale reference
+        const locationType = mentionedLocs[0]?.extractedSpecs?.locationType || mentionedLocs[0]?.description || 'environment';
+        const isExterior = /street|city|outdoor|exterior|plaza|park|beach|mountain|forest|skyline|tower|building/i.test(locationType);
+        const isInterior = /interior|room|office|studio|cafe|restaurant|bar|club|house|apartment/i.test(locationType);
+        const isLandmark = /tower|skyscraper|monument|landmark|bridge|stadium/i.test(locationType);
+
+        let scaleGuidance = '';
+        if (isLandmark) {
+          scaleGuidance = `
+SCALE REFERENCE: The location (${locNames}) is a LANDMARK/LARGE STRUCTURE.
+- Characters (${charNames}) should appear as NORMAL HUMAN SIZE relative to this massive structure
+- If the structure is 100+ meters tall, characters should be small figures in frame
+- Use wide establishing shots to show scale relationship
+- Characters might occupy 5-15% of frame height when showing full structure
+- Consider placing characters in foreground with structure in background for depth`;
+        } else if (isExterior) {
+          scaleGuidance = `
+SCALE REFERENCE: The location (${locNames}) is an EXTERIOR ENVIRONMENT.
+- Characters (${charNames}) should be human-scale (1.6-1.9m tall equivalent)
+- Environment elements (doors, cars, streetlights) provide scale anchors
+- Characters should be grounded - feet touching floor/ground
+- Use environmental perspective correctly (vanishing points, horizon line)`;
+        } else if (isInterior) {
+          scaleGuidance = `
+SCALE REFERENCE: The location (${locNames}) is an INTERIOR SPACE.
+- Characters (${charNames}) should fit naturally within room proportions
+- Standard ceiling height ~2.5-3m, doors ~2m tall for reference
+- Characters should interact believably with furniture/fixtures
+- Maintain realistic spatial relationships`;
+        } else {
+          scaleGuidance = `
+SCALE REFERENCE: Composite scene with characters (${charNames}) in location (${locNames}).
+- Apply realistic human proportions relative to environment
+- Use environmental elements as scale anchors`;
+        }
+
+        contextParts.push(`
+=== SCENE COMPOSITION SYSTEM ===
+CRITICAL INSTRUCTION: This is a COMPOSITE SCENE combining character(s) with location(s).
+The AI MUST maintain REALISTIC SCALE and NATURAL PLACEMENT.
+
+${scaleGuidance}
+
+COMPOSITION RULES:
+1. NEVER make characters appear giant or miniature relative to environment
+2. Use cinematic depth: foreground, midground, background layers
+3. Characters should cast appropriate shadows matching scene lighting
+4. Perspective must be consistent between character and environment
+5. Eye-level horizon line should match between elements
+6. Characters should appear to INHABIT the space, not be pasted onto it
+
+PLACEMENT STRATEGY:
+- Establish environment first, then place character within it
+- Character position should make spatial sense (standing on ground, sitting on furniture)
+- Leave breathing room - don't crowd character against environment edges
+- Consider rule of thirds for character placement
+===`);
+      }
+
+      // Add product placement guidance when product + location are combined
+      if (mentionedProds.length > 0 && mentionedLocs.length > 0) {
+        const prodNames = mentionedProds.filter(Boolean).map(p => p!.name).join(', ');
+        contextParts.push(`
+=== PRODUCT PLACEMENT GUIDANCE ===
+Product (${prodNames}) should be naturally integrated into the environment:
+- Realistic scale relative to surroundings
+- Proper surface contact (on table, floor, shelf)
+- Lighting should match environment
+- Reflections/shadows consistent with scene
+===`);
+      }
+
+      processedPrompt = `${effectivePrompt}\n\n${contextParts.join('\n\n')}`;
     }
 
     // Inject style context into prompt
@@ -771,9 +996,10 @@ const StageOne: React.FC<StageOneProps> = ({
       processedPrompt = styleContext + processedPrompt;
     }
 
-    const userMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'user', content: input, timestamp: Date.now(), images: allReferences.map(r => ({ id: r.id, projectId: currentProject.id, url: r.data, prompt: `${r.type}: ${r.name || 'Reference'}${r.styleDescription ? ' (DNA)' : ''}`, aspectRatio: '1:1' })) };
+    const userMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'user', content: effectivePrompt, timestamp: Date.now(), images: allReferences.map(r => ({ id: r.id, projectId: currentProject.id, url: r.data, prompt: `${r.type}: ${r.name || 'Reference'}${r.styleDescription ? ' (DNA)' : ''}`, aspectRatio: '1:1' })) };
     await addMessageToStateAndDb(userMsg);
     setInput('');
+    setStructuredInput({ subject: '', action: '', shotType: '', lighting: '', environment: '' });
     isCancelledRef.current = false;
     setIsProcessing(true);
     setLoadingPhase('Consulting Design Director...');
@@ -786,27 +1012,42 @@ const StageOne: React.FC<StageOneProps> = ({
       await addMessageToStateAndDb(analysisMsg);
 
       const promptsToRun = directorResponse.imagePrompts.slice(0, imageCount);
-      setLoadingPhase(`Rendering ${promptsToRun.length} concepts at ${resolution}${useGrounding ? ' (Search On)' : ''}...`);
-      const generatedImages: GeneratedImage[] = [];
+      setLoadingPhase(`Rendering ${promptsToRun.length} concepts in parallel at ${resolution}${useGrounding ? ' (Search On)' : ''}...`);
 
-      for (const prompt of promptsToRun) {
-        if (isCancelledRef.current) break;
-        try {
-            const img = await generateImage(prompt, allReferences, { aspectRatio, resolution }, useGrounding);
-            if (isCancelledRef.current) break;
-            img.projectId = currentProject.id;
-            generatedImages.push(img);
-        } catch (e) { console.error("Gen failed:", e); }
-      }
+      // Use parallel batch generation with progress tracking
+      const batchResult: BatchGenerationResult = await generateImageBatch(
+        promptsToRun,
+        allReferences,
+        { aspectRatio, resolution },
+        useGrounding,
+        (completed, total, lastResult) => {
+          if (isCancelledRef.current) return;
+          const successIcon = lastResult === 'success' ? '✓' : '✗';
+          setLoadingPhase(`Rendering: ${completed}/${total} ${successIcon} (${Math.round((completed/total)*100)}%)`);
+        },
+        3 // Process 3 images in parallel
+      );
 
-      if (isCancelledRef.current && generatedImages.length === 0) return;
+      if (isCancelledRef.current && batchResult.successful.length === 0) return;
+
+      // Assign project IDs to successful images
+      const generatedImages = batchResult.successful.map(img => ({
+        ...img,
+        projectId: currentProject.id
+      }));
 
       if (generatedImages.length > 0) {
-        const imageMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: "Here are the visual assets.", timestamp: Date.now(), images: generatedImages };
+        // Build result message with success/failure info
+        let resultContent = "Here are the visual assets.";
+        if (batchResult.failed.length > 0) {
+          resultContent = `Generated ${generatedImages.length}/${batchResult.totalRequested} images successfully. (${batchResult.failed.length} failed)`;
+        }
+
+        const imageMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: resultContent, timestamp: Date.now(), images: generatedImages };
         await addMessageToStateAndDb(imageMsg);
         if (onImageGenerated) onImageGenerated(generatedImages);
       } else if (!isCancelledRef.current) {
-         const errorMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: "I analyzed the concept but failed to generate visual assets.", timestamp: Date.now() };
+         const errorMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: `Failed to generate visual assets. ${batchResult.failed.length} attempts failed.`, timestamp: Date.now() };
          await addMessageToStateAndDb(errorMsg);
       }
     } catch (error) {
@@ -829,6 +1070,20 @@ const StageOne: React.FC<StageOneProps> = ({
   return (
     <div className="flex h-full bg-zinc-950 text-zinc-100 relative">
       <CoverageModal isOpen={showCoverageModal} onClose={() => setShowCoverageModal(false)} onGenerate={runCoverageGeneration} />
+      <ContactSheetModal
+        isOpen={showContactSheetModal}
+        onClose={() => setShowContactSheetModal(false)}
+        references={references}
+        config={{ aspectRatio, resolution }}
+        onImagesGenerated={(images) => {
+          if (onImageGenerated) {
+            // Assign project IDs to generated images
+            const projectImages = images.map(img => ({ ...img, projectId: currentProject.id }));
+            onImageGenerated(projectImages);
+          }
+        }}
+        showNotification={showNotification}
+      />
       
       {/* Power Tool Input Modal */}
       {selectedTool && (
@@ -840,9 +1095,100 @@ const StageOne: React.FC<StageOneProps> = ({
       )}
 
       {isLightboxOpen && lightboxImage && (
-          <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-8 backdrop-blur-xl animate-in fade-in duration-200" onClick={() => setIsLightboxOpen(false)}>
-              <button onClick={() => setIsLightboxOpen(false)} className="absolute top-4 right-4 text-white/50 hover:text-white"><X className="w-8 h-8" /></button>
-              <img src={lightboxImage} alt="Preview" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <div className="fixed inset-0 z-50 bg-black/95 flex items-stretch backdrop-blur-xl animate-in fade-in duration-200" onClick={closeLightbox}>
+              <button onClick={closeLightbox} className="absolute top-4 right-4 text-white/50 hover:text-white z-10"><X className="w-8 h-8" /></button>
+
+              {/* Image Area */}
+              <div className={`flex-1 flex items-center justify-center p-8 transition-all ${showMetadataPanel ? 'pr-0' : ''}`}>
+                  <img src={lightboxImage} alt="Preview" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+              </div>
+
+              {/* Production Metadata Button */}
+              <button
+                  onClick={(e) => { e.stopPropagation(); handleAnalyzeMetadata(); }}
+                  disabled={isAnalyzingMetadata}
+                  className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-full font-medium text-sm transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                  {isAnalyzingMetadata ? <Loader2 className="w-4 h-4 animate-spin" /> : <Info className="w-4 h-4" />}
+                  {isAnalyzingMetadata ? 'Analyzing...' : 'Production Metadata'}
+              </button>
+
+              {/* Production Metadata Panel */}
+              {showMetadataPanel && (
+                  <div className="w-[400px] bg-zinc-900/95 border-l border-white/10 overflow-y-auto animate-in slide-in-from-right duration-300" onClick={(e) => e.stopPropagation()}>
+                      <div className="sticky top-0 bg-zinc-900 border-b border-white/10 p-4 flex items-center justify-between">
+                          <h3 className="font-bold text-white flex items-center gap-2"><Info className="w-4 h-4 text-violet-400" /> Production Analysis</h3>
+                          <button onClick={() => setShowMetadataPanel(false)} className="text-zinc-400 hover:text-white"><X className="w-4 h-4" /></button>
+                      </div>
+
+                      {isAnalyzingMetadata ? (
+                          <div className="p-8 flex flex-col items-center justify-center text-center">
+                              <Loader2 className="w-8 h-8 text-violet-400 animate-spin mb-4" />
+                              <p className="text-zinc-400 text-sm">Analyzing lighting, composition, and technical details...</p>
+                          </div>
+                      ) : lightboxMetadata ? (
+                          <div className="p-4 space-y-6">
+                              {/* Lighting Analysis */}
+                              <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/5">
+                                  <h4 className="text-xs text-violet-400 uppercase tracking-wider font-bold mb-3 flex items-center gap-2"><Lightbulb className="w-3 h-3" /> Lighting Analysis</h4>
+                                  <div className="space-y-2 text-sm">
+                                      <div className="flex justify-between"><span className="text-zinc-500">Key Light:</span><span className="text-zinc-200">{lightboxMetadata.lightingAnalysis.keyLight}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Fill Ratio:</span><span className="text-zinc-200">{lightboxMetadata.lightingAnalysis.fillRatio}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Color Temp:</span><span className="text-zinc-200">{lightboxMetadata.lightingAnalysis.colorTemp}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Mood:</span><span className="text-zinc-200">{lightboxMetadata.lightingAnalysis.mood}</span></div>
+                                      {lightboxMetadata.lightingAnalysis.practicals.length > 0 && (
+                                          <div className="pt-2 border-t border-white/5">
+                                              <span className="text-zinc-500 text-xs block mb-1">Practicals:</span>
+                                              <div className="flex flex-wrap gap-1">{lightboxMetadata.lightingAnalysis.practicals.map((p, i) => <span key={i} className="text-[10px] bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded">{p}</span>)}</div>
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+
+                              {/* Set Dressing */}
+                              <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/5">
+                                  <h4 className="text-xs text-amber-400 uppercase tracking-wider font-bold mb-3 flex items-center gap-2"><Layers className="w-3 h-3" /> Set Dressing</h4>
+                                  <div className="space-y-2 text-sm">
+                                      <div><span className="text-zinc-500 text-xs block">Foreground:</span><span className="text-zinc-200">{lightboxMetadata.setDressingNotes.foreground}</span></div>
+                                      <div><span className="text-zinc-500 text-xs block">Midground:</span><span className="text-zinc-200">{lightboxMetadata.setDressingNotes.midground}</span></div>
+                                      <div><span className="text-zinc-500 text-xs block">Background:</span><span className="text-zinc-200">{lightboxMetadata.setDressingNotes.background}</span></div>
+                                      <div className="pt-2 border-t border-white/5"><span className="text-zinc-500 text-xs block">Atmosphere:</span><span className="text-zinc-200">{lightboxMetadata.setDressingNotes.atmosphere}</span></div>
+                                  </div>
+                              </div>
+
+                              {/* Technical Notes */}
+                              <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/5">
+                                  <h4 className="text-xs text-cyan-400 uppercase tracking-wider font-bold mb-3 flex items-center gap-2"><Camera className="w-3 h-3" /> Technical Notes</h4>
+                                  <div className="space-y-2 text-sm">
+                                      <div className="flex justify-between"><span className="text-zinc-500">Lens:</span><span className="text-zinc-200">{lightboxMetadata.technicalNotes.suggestedLens}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Aperture:</span><span className="text-zinc-200">{lightboxMetadata.technicalNotes.aperture}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Shot Type:</span><span className="text-zinc-200">{lightboxMetadata.technicalNotes.shotType}</span></div>
+                                      <div className="flex justify-between"><span className="text-zinc-500">Camera Height:</span><span className="text-zinc-200">{lightboxMetadata.technicalNotes.cameraHeight}</span></div>
+                                  </div>
+                              </div>
+
+                              {/* Recommendations */}
+                              {lightboxMetadata.recommendations.length > 0 && (
+                                  <div className="bg-violet-900/30 rounded-xl p-4 border border-violet-500/20">
+                                      <h4 className="text-xs text-violet-300 uppercase tracking-wider font-bold mb-3">Shooting Recommendations</h4>
+                                      <ul className="space-y-2">
+                                          {lightboxMetadata.recommendations.map((rec, i) => (
+                                              <li key={i} className="text-sm text-zinc-300 flex items-start gap-2">
+                                                  <span className="text-violet-400 mt-1">•</span>
+                                                  {rec}
+                                              </li>
+                                          ))}
+                                      </ul>
+                                  </div>
+                              )}
+                          </div>
+                      ) : (
+                          <div className="p-8 text-center text-zinc-500 text-sm">
+                              Click "Production Metadata" to analyze this image.
+                          </div>
+                      )}
+                  </div>
+              )}
           </div>
       )}
 
@@ -1042,7 +1388,7 @@ const StageOne: React.FC<StageOneProps> = ({
                       {msg.images.map((img) => (
                         <div key={img.id} className="relative group overflow-hidden rounded-2xl border border-white/5 bg-zinc-900 shadow-2xl transition-all hover:scale-[1.01] hover:shadow-violet-900/20 duration-300">
                           <img src={img.url} alt={img.prompt} className="w-full h-auto object-cover" />
-                           <button onClick={() => { setLightboxImage(img.url); setIsLightboxOpen(true); }} className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white/70 hover:text-white hover:bg-black/90 opacity-0 group-hover:opacity-100 transition-all backdrop-blur-md z-10"><ScanEye className="w-4 h-4" /></button>
+                           <button onClick={() => openLightbox(img.url)} className="absolute top-3 right-3 p-2 bg-black/60 rounded-full text-white/70 hover:text-white hover:bg-black/90 opacity-0 group-hover:opacity-100 transition-all backdrop-blur-md z-10"><ScanEye className="w-4 h-4" /></button>
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3 backdrop-blur-sm p-4">
                              <button onClick={() => onImageSelect(img)} className="bg-white text-black px-6 py-2.5 rounded-full font-bold text-xs hover:bg-zinc-200 transition-transform hover:scale-105 shadow-xl flex items-center gap-2"><Sparkles className="w-3 h-3"/> Edit Canvas</button>
                             <div className="flex gap-2 flex-wrap justify-center">
@@ -1112,7 +1458,94 @@ const StageOne: React.FC<StageOneProps> = ({
                 <button onClick={() => fileInputRef.current?.click()} className={`p-4 rounded-2xl transition-all relative group shadow-lg border border-white/5 ${references.length === 0 ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-zinc-900 text-zinc-500'}`} title="Upload Reference"><Plus className="w-6 h-6" />{references.length === 0 && <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-violet-500"></span></span>}</button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={handleFileUpload} />
               <div className="flex-1 relative group">
-                  <textarea value={input} onChange={handleInputChange} onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}} placeholder="Describe your vision... (Type @ to mention characters, locations, products)" className="w-full bg-zinc-900/50 border border-white/5 text-white rounded-2xl p-5 pr-20 resize-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 focus:outline-none min-h-[70px] max-h-[160px] shadow-inner transition-all placeholder:text-zinc-600 backdrop-blur-sm" rows={1} />
+                  {/* Input Mode Toggle */}
+                  <div className="absolute -top-8 left-0 flex items-center gap-2">
+                      <button
+                          onClick={() => setInputMode('simple')}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${inputMode === 'simple' ? 'bg-violet-600 text-white' : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                          <Type className="w-3 h-3" /> Simple
+                      </button>
+                      <button
+                          onClick={() => setInputMode('structured')}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider transition-all ${inputMode === 'structured' ? 'bg-violet-600 text-white' : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                          <Sliders className="w-3 h-3" /> Structured
+                      </button>
+                  </div>
+
+                  {/* Simple Mode */}
+                  {inputMode === 'simple' ? (
+                      <textarea value={input} onChange={handleInputChange} onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}} placeholder="Describe your vision... (Type @ to mention characters, locations, products)" className="w-full bg-zinc-900/50 border border-white/5 text-white rounded-2xl p-5 pr-20 resize-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 focus:outline-none min-h-[70px] max-h-[160px] shadow-inner transition-all placeholder:text-zinc-600 backdrop-blur-sm" rows={1} />
+                  ) : (
+                      /* Structured Mode */
+                      <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-4 shadow-inner backdrop-blur-sm">
+                          <div className="grid grid-cols-2 gap-3">
+                              <div className="col-span-2">
+                                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mb-1 block">Subject</label>
+                                  <input
+                                      type="text"
+                                      value={structuredInput.subject}
+                                      onChange={(e) => setStructuredInput({ ...structuredInput, subject: e.target.value })}
+                                      placeholder="e.g., Detective in trench coat"
+                                      className="w-full bg-zinc-800/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mb-1 block">Action/Pose</label>
+                                  <input
+                                      type="text"
+                                      value={structuredInput.action}
+                                      onChange={(e) => setStructuredInput({ ...structuredInput, action: e.target.value })}
+                                      placeholder="e.g., Walking away"
+                                      className="w-full bg-zinc-800/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mb-1 block">Shot Type</label>
+                                  <select
+                                      value={structuredInput.shotType}
+                                      onChange={(e) => setStructuredInput({ ...structuredInput, shotType: e.target.value })}
+                                      className="w-full bg-zinc-800/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500/50 cursor-pointer"
+                                  >
+                                      <option value="">Select shot...</option>
+                                      <option value="Extreme Wide Shot">Extreme Wide Shot</option>
+                                      <option value="Wide Shot">Wide Shot</option>
+                                      <option value="Medium Wide">Medium Wide</option>
+                                      <option value="Medium Shot">Medium Shot</option>
+                                      <option value="Medium Close-Up">Medium Close-Up</option>
+                                      <option value="Close-Up">Close-Up</option>
+                                      <option value="Extreme Close-Up">Extreme Close-Up</option>
+                                      <option value="Over-the-Shoulder">Over-the-Shoulder</option>
+                                      <option value="POV Shot">POV Shot</option>
+                                      <option value="Low Angle">Low Angle</option>
+                                      <option value="High Angle">High Angle</option>
+                                      <option value="Dutch Angle">Dutch Angle</option>
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mb-1 block">Lighting</label>
+                                  <input
+                                      type="text"
+                                      value={structuredInput.lighting}
+                                      onChange={(e) => setStructuredInput({ ...structuredInput, lighting: e.target.value })}
+                                      placeholder="e.g., Neon-lit, moody"
+                                      className="w-full bg-zinc-800/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mb-1 block">Environment</label>
+                                  <input
+                                      type="text"
+                                      value={structuredInput.environment}
+                                      onChange={(e) => setStructuredInput({ ...structuredInput, environment: e.target.value })}
+                                      placeholder="e.g., Rainy city street"
+                                      className="w-full bg-zinc-800/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                                  />
+                              </div>
+                          </div>
+                      </div>
+                  )}
                   {/* @mention autocomplete dropdown */}
                   {showMentions && (filteredCharacters.length > 0 || filteredLocations.length > 0 || filteredProducts.length > 0) && (
                       <div className="absolute bottom-full mb-2 left-0 w-72 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-in slide-in-from-bottom-2 max-h-64 overflow-y-auto">
@@ -1194,6 +1627,7 @@ const StageOne: React.FC<StageOneProps> = ({
                       </div>
                   )}
                   <div className="absolute right-4 top-4 flex gap-1">
+                      <button onClick={() => setShowContactSheetModal(true)} className="text-zinc-500 hover:text-cyan-400 transition-colors p-1.5 hover:bg-white/5 rounded-lg" title="12-Shot Contact Sheet"><Grid className="w-5 h-5" /></button>
                       <button onClick={() => setShowPowerTools(!showPowerTools)} className={`p-1.5 rounded-lg transition-colors ${showPowerTools ? 'bg-violet-600 text-white' : 'text-zinc-500 hover:text-violet-400 hover:bg-white/5'}`} title="Nano Power Tools (Templates)"><Zap className="w-5 h-5 fill-current" /></button>
                       <button onClick={handleEnhancePrompt} disabled={!input.trim() || isEnhancing} className="text-zinc-500 hover:text-violet-400 transition-colors disabled:opacity-30 p-1.5 hover:bg-white/5 rounded-lg" title="Magic Enhance">{isEnhancing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}</button>
                   </div>

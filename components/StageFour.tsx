@@ -52,6 +52,7 @@ const StageFour: React.FC<StageFourProps> = ({
   const [audioDirection, setAudioDirection] = useState('');
   const [resolution, setResolution] = useState('720p');
   const [motionIntensity, setMotionIntensity] = useState<number>(5); // 1-10
+  const [cameraStability, setCameraStability] = useState<number>(20); // 0 = Tripod, 100 = Chaos
   const [filmLook, setFilmLook] = useState('Standard');
   
   // Pipeline State
@@ -141,7 +142,16 @@ const StageFour: React.FC<StageFourProps> = ({
           let finalPrompt = prompt;
           if (motionIntensity <= 3) finalPrompt += " Subtle, minimal movement, atmospheric.";
           else if (motionIntensity >= 8) finalPrompt += " Dynamic, rapid movement, high energy, motion blur.";
-          
+
+          // Stability/Handheld context from shot-design-agent
+          if (cameraStability < 30) {
+              finalPrompt += " Shot on a stable tripod, smooth fluid motion, steadycam.";
+          } else if (cameraStability < 70) {
+              finalPrompt += " Handheld camera movement, slight organic shake, realistic documentary feel.";
+          } else {
+              finalPrompt += " Intense shaky cam, chaotic action camera, heavy vibration, action movie style.";
+          }
+
           if (filmLook !== 'Standard') finalPrompt += ` Cinematic style: ${filmLook} look.`;
           if (audioDirection) finalPrompt += ` Audio: ${audioDirection}.`;
           if (duration) finalPrompt += ` Duration: ${duration}.`;
@@ -246,7 +256,7 @@ const StageFour: React.FC<StageFourProps> = ({
 
   const handleEditEndFrame = async () => {
       if (!endFrame) return;
-      const newInstruction = prompt("Enter edit instruction for the End Frame:");
+      const newInstruction = window.prompt("Enter edit instruction for the End Frame:");
       if (!newInstruction) return;
 
       setIsGenerating(true);
@@ -416,7 +426,29 @@ const StageFour: React.FC<StageFourProps> = ({
                                 {CINEMATIC_MOVES.map(m => <option key={m} value={m}>{m}</option>)}
                             </select>
                         </div>
-                        {/* Additional sliders... */}
+                        {/* Handheld Chaos Slider */}
+                        <div>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="text-[10px] text-slate-500 flex items-center gap-1">
+                                    <Gauge className="w-3 h-3 text-violet-400" />
+                                    Handheld Chaos
+                                </label>
+                                <span className="text-[10px] font-mono text-slate-600">{cameraStability}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={cameraStability}
+                                onChange={(e) => setCameraStability(parseInt(e.target.value))}
+                                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
+                            />
+                            <div className="flex justify-between text-[8px] text-slate-600 font-mono mt-0.5">
+                                <span>TRIPOD</span>
+                                <span>HANDHELD</span>
+                                <span>CHAOS</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

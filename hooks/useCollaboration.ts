@@ -344,9 +344,9 @@ export function useCollaboration({
      * Handle updates from other collaborators
      */
     const handleRemoteUpdate = useCallback((data: {
-        scriptData: any;
-        moodBoards: any[];
-        globalHistory: any[];
+        scriptData: ScriptData;
+        moodBoards: MoodBoard[];
+        globalHistory: GeneratedImage[];
         lastEditedBy?: string;
         updatedAt?: Date;
     }) => {

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward } from 'lucide-react';
 import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
@@ -19,6 +19,8 @@ interface StageTwoProps {
   bibleCharacters?: CharacterProfile[]; // For @mention support
   bibleLocations?: LocationProfile[]; // For @mention support
   bibleProducts?: ProductProfile[]; // For @mention support
+  editQueue?: GeneratedImage[]; // Queue of images waiting to be edited
+  onProcessQueue?: () => void; // Process next item in queue
 }
 
 const MAX_REFERENCES = 14;
@@ -37,7 +39,7 @@ const QUICK_EDITS = [
     { label: '4K Upscale', prompt: 'STRICT UPSCALE ONLY. Increase resolution to 4K. CRITICAL: Preserve EXACTLY all colors, hair color, skin tone, beard color, eye color, clothing colors, and all visual details. Do NOT alter, reinterpret, or regenerate any content. Only add subtle sharpness and micro-texture detail. This is a technical upscale, not a creative edit.', resolution: '4K' },
 ];
 
-const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotification, onImageEdited, onAddToGallery, currentProject, onLibraryUpdate, productionDesign, bibleCharacters = [], bibleLocations = [], bibleProducts = [] }) => {
+const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotification, onImageEdited, onAddToGallery, currentProject, onLibraryUpdate, productionDesign, bibleCharacters = [], bibleLocations = [], bibleProducts = [], editQueue = [], onProcessQueue }) => {
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(initialImage);
   const [history, setHistory] = useState<GeneratedImage[]>(initialImage ? [initialImage] : []);
   const [instruction, setInstruction] = useState('');
@@ -891,6 +893,21 @@ CRITICAL REQUIREMENTS:
         <button onClick={onBack} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors" title="Back to Concepts">
           <ArrowLeft className="w-5 h-5" />
         </button>
+
+        {/* Edit Queue Indicator */}
+        {editQueue.length > 0 && onProcessQueue && (
+          <button
+            onClick={onProcessQueue}
+            className="relative p-2.5 text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-all border border-amber-500/30"
+            title={`${editQueue.length} image(s) in queue - Click to load next`}
+          >
+            <SkipForward className="w-5 h-5" />
+            <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-black text-[10px] font-bold rounded-full flex items-center justify-center">
+              {editQueue.length}
+            </span>
+          </button>
+        )}
+
         <div className="h-px w-8 bg-white/10" />
         
         <button 

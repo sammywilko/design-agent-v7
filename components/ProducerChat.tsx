@@ -12,6 +12,20 @@ import {
     ToolResult
 } from '../services/producerAgent';
 
+// Gemini API response types
+interface GeminiPart {
+    text?: string;
+    functionCall?: {
+        name: string;
+        args: Record<string, unknown>;
+    };
+}
+
+interface GeminiFunctionCall {
+    name: string;
+    args: Record<string, unknown>;
+}
+
 interface ProducerChatProps {
     appContext: ProducerAppContext;
     isOpen: boolean;
@@ -33,7 +47,7 @@ const ProducerChat: React.FC<ProducerChatProps> = ({ appContext, isOpen, onClose
     const [showQuickPrompts, setShowQuickPrompts] = useState(true);
     const [pendingConfirmation, setPendingConfirmation] = useState<{
         toolName: string;
-        parameters: any;
+        parameters: Record<string, unknown>;
         message: string;
     } | null>(null);
 
@@ -56,7 +70,7 @@ const ProducerChat: React.FC<ProducerChatProps> = ({ appContext, isOpen, onClose
     // Build Gemini API request with function calling
     const callGeminiWithTools = async (userMessage: string): Promise<{
         text: string;
-        functionCalls?: { name: string; args: any }[];
+        functionCalls?: GeminiFunctionCall[];
     }> => {
         const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY;
         if (!apiKey) {
@@ -100,16 +114,16 @@ const ProducerChat: React.FC<ProducerChatProps> = ({ appContext, isOpen, onClose
 
         // Check for function calls
         const functionCalls = candidate.content.parts
-            .filter((part: any) => part.functionCall)
-            .map((part: any) => ({
-                name: part.functionCall.name,
-                args: part.functionCall.args
+            .filter((part: GeminiPart) => part.functionCall)
+            .map((part: GeminiPart) => ({
+                name: part.functionCall!.name,
+                args: part.functionCall!.args
             }));
 
         // Get text response
         const textParts = candidate.content.parts
-            .filter((part: any) => part.text)
-            .map((part: any) => part.text);
+            .filter((part: GeminiPart) => part.text)
+            .map((part: GeminiPart) => part.text);
 
         const text = textParts.join('\n');
 
@@ -196,7 +210,7 @@ const ProducerChat: React.FC<ProducerChatProps> = ({ appContext, isOpen, onClose
 
             // If there are function calls, execute them
             if (response.functionCalls && response.functionCalls.length > 0) {
-                const toolCalls: { toolName: string; parameters: any; result: ToolResult }[] = [];
+                const toolCalls: { toolName: string; parameters: Record<string, unknown>; result: ToolResult }[] = [];
 
                 for (const call of response.functionCalls) {
                     // Execute the tool
