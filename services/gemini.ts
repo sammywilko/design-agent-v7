@@ -3007,18 +3007,28 @@ ${styleDNA.compositionPatterns?.length > 0 ? `- Composition: ${styleDNA.composit
 };
 
 /**
+ * Realism mode for Photo-to-Character
+ * - 'stylized': Apply artistic style from reference (default)
+ * - 'photo-real': Maximum facial accuracy, documentary/recon quality
+ */
+export type PhotoRealismMode = 'stylized' | 'photo-real';
+
+/**
  * FAST Photo-to-Character - Single API call version
  * Skips separate spec extraction and does everything in ONE generation call
  * Expected time: ~15-20 seconds (vs 50-80 seconds for multi-call version)
+ *
+ * @param realismMode - 'stylized' for artistic interpretation, 'photo-real' for maximum likeness
  */
 export const generateStylizedCharacterFromPhotoFast = async (
   realPhoto: string,
   styleDNA: StyleDNA,
   styleReferenceImage: string,
   characterName: string,
-  config: GenerationConfig = { aspectRatio: '1:1', resolution: '2K' }
+  config: GenerationConfig = { aspectRatio: '1:1', resolution: '2K' },
+  realismMode: PhotoRealismMode = 'stylized'
 ): Promise<PhotoToCharacterResult> => {
-  console.log('⚡ FAST Photo-to-Character for:', characterName);
+  console.log(`⚡ FAST Photo-to-Character for: ${characterName} [${realismMode} mode]`);
   const startTime = Date.now();
 
   const ai = await getClient();
@@ -3029,8 +3039,53 @@ export const generateStylizedCharacterFromPhotoFast = async (
   const cleanStyleData = cleanDataUrl(styleReferenceImage);
   const styleMimeType = getMimeType(styleReferenceImage);
 
-  // Single prompt that combines analysis + generation
-  const fastPrompt = `PHOTO-TO-STYLIZED CHARACTER - SINGLE PASS
+  // Different prompts based on realism mode
+  const fastPrompt = realismMode === 'photo-real'
+    ? `PHOTO-REAL CHARACTER CREATION - MAXIMUM LIKENESS
+
+CHARACTER NAME: ${characterName}
+
+=== YOUR TASK ===
+Create a photo-realistic portrait of the person in REFERENCE IMAGE 1, using the lighting and composition style from REFERENCE IMAGE 2.
+
+=== CRITICAL: FACIAL ACCURACY REQUIREMENTS ===
+This is for DOCUMENTARY / RECON purposes. EXACT likeness is required.
+
+PRESERVE WITH 100% ACCURACY:
+- EXACT face shape, bone structure, and proportions
+- EXACT eye shape, size, spacing, and color
+- EXACT nose shape, bridge, and nostrils
+- EXACT mouth shape, lip thickness, and expression lines
+- EXACT skin texture, pores, and any marks/moles/freckles
+- EXACT facial hair pattern, color, and growth
+- EXACT wrinkles, age lines, and skin characteristics
+- EXACT hair color, texture, style, and hairline
+- EXACT ear shape and position
+- Glasses/accessories if present - exact style
+
+DO NOT:
+- Idealize, beautify, or smooth features
+- Make the person look younger or older
+- Change facial proportions in ANY way
+- Apply artistic interpretation to facial structure
+- Average or generalize any features
+
+=== STYLE FROM REFERENCE 2 ===
+Apply ONLY these elements from the style reference:
+- Lighting approach: ${styleDNA.lightingCharacteristics || 'Natural lighting'}
+- Color grading: ${styleDNA.colorPalette?.join(', ') || 'Natural colors'}
+- Composition style
+
+=== OUTPUT ===
+1. Photo-realistic quality (NOT illustration, NOT stylized)
+2. Professional portrait photography quality
+3. The result should be INDISTINGUISHABLE from a real photograph
+4. Person must be 100% identifiable as THE EXACT SAME PERSON
+
+[REFERENCE 1 - SUBJECT (MATCH FACE EXACTLY)]
+[REFERENCE 2 - LIGHTING/COMPOSITION REFERENCE ONLY]`
+
+    : `PHOTO-TO-STYLIZED CHARACTER - SINGLE PASS
 
 CHARACTER NAME: ${characterName}
 
@@ -3093,18 +3148,24 @@ ${styleDNA.promptSnippet}
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`✅ FAST generation complete in ${elapsed}s`);
+  console.log(`✅ FAST generation complete in ${elapsed}s [${realismMode}]`);
 
-  // Create minimal character profile (no extracted specs in fast mode)
+  // Create character profile with mode-appropriate description
+  const isPhotoReal = realismMode === 'photo-real';
   const characterProfile: CharacterProfile = {
     id: crypto.randomUUID(),
     name: characterName,
-    description: `Stylized character based on photo. ${styleDNA.promptSnippet}`,
+    description: isPhotoReal
+      ? `Photo-realistic character for documentary/recon. Exact likeness preserved.`
+      : `Stylized character based on photo. ${styleDNA.promptSnippet}`,
     imageRefs: [stylizedImage],
-    promptSnippet: `${characterName} character in ${styleDNA.photographicStyle || 'stylized'} style`,
+    promptSnippet: isPhotoReal
+      ? `${characterName} - photo-realistic portrait, exact likeness`
+      : `${characterName} character in ${styleDNA.photographicStyle || 'stylized'} style`,
     consistencyAnchors: '',
     sourcePhoto: realPhoto,
     generatedFromPhoto: true,
+    photoRealMode: isPhotoReal,
     refCoverage: {
       face: [stylizedImage]
     }

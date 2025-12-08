@@ -9,7 +9,7 @@ import {
     Palette, CheckCircle, AlertCircle, Image as ImageIcon, Trash2
 } from 'lucide-react';
 import { CharacterProfile, ProjectDefaultStyle, StyleDNA } from '../types';
-import { generateStylizedCharacterFromPhotoFast, extractStyleDNAFromImage } from '../services/gemini';
+import { generateStylizedCharacterFromPhotoFast, extractStyleDNAFromImage, PhotoRealismMode } from '../services/gemini';
 
 interface PhotoToCharacterModalProps {
     isOpen: boolean;
@@ -42,6 +42,7 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
     // Photo upload
     const [personPhoto, setPersonPhoto] = useState<string | null>(null);
     const [characterName, setCharacterName] = useState('');
+    const [realismMode, setRealismMode] = useState<PhotoRealismMode>('stylized');
 
     // Result
     const [generatedCharacter, setGeneratedCharacter] = useState<CharacterProfile | null>(null);
@@ -135,7 +136,9 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
                 personPhoto,
                 styleToUse.styleDNA,
                 styleToUse.referenceImage,
-                characterName.trim()
+                characterName.trim(),
+                { aspectRatio: '1:1', resolution: '2K' },
+                realismMode
             );
 
             // Add style tracking to the character
@@ -168,6 +171,7 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
         setExtractedStyleDNA(null);
         setPersonPhoto(null);
         setCharacterName('');
+        setRealismMode('stylized');
         setGeneratedCharacter(null);
         onClose();
     };
@@ -408,6 +412,46 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
                                         />
                                     </div>
 
+                                    {/* Realism Mode Toggle */}
+                                    <div className="p-4 bg-zinc-800/50 rounded-xl border border-zinc-700">
+                                        <label className="text-sm font-medium text-zinc-300 block mb-3">Output Mode</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={() => setRealismMode('stylized')}
+                                                className={`p-3 rounded-lg border transition-all text-left ${
+                                                    realismMode === 'stylized'
+                                                        ? 'border-violet-500 bg-violet-500/10 text-white'
+                                                        : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <Palette size={16} className={realismMode === 'stylized' ? 'text-violet-400' : ''} />
+                                                    <span className="font-medium text-sm">Stylized</span>
+                                                </div>
+                                                <p className="text-xs text-zinc-500">Artistic interpretation</p>
+                                            </button>
+                                            <button
+                                                onClick={() => setRealismMode('photo-real')}
+                                                className={`p-3 rounded-lg border transition-all text-left ${
+                                                    realismMode === 'photo-real'
+                                                        ? 'border-emerald-500 bg-emerald-500/10 text-white'
+                                                        : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <Camera size={16} className={realismMode === 'photo-real' ? 'text-emerald-400' : ''} />
+                                                    <span className="font-medium text-sm">Photo-Real</span>
+                                                </div>
+                                                <p className="text-xs text-zinc-500">Max likeness (recon)</p>
+                                            </button>
+                                        </div>
+                                        {realismMode === 'photo-real' && (
+                                            <p className="mt-2 text-xs text-emerald-400/80">
+                                                Documentary mode: Exact facial features preserved
+                                            </p>
+                                        )}
+                                    </div>
+
                                     <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                                         <div className="flex items-start gap-3">
                                             <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -425,10 +469,14 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
                                     <button
                                         onClick={handleGenerate}
                                         disabled={!personPhoto || !characterName.trim()}
-                                        className="w-full bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500 disabled:from-zinc-700 disabled:to-zinc-700 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
+                                        className={`w-full ${
+                                            realismMode === 'photo-real'
+                                                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500'
+                                                : 'bg-gradient-to-r from-fuchsia-600 to-violet-600 hover:from-fuchsia-500 hover:to-violet-500'
+                                        } disabled:from-zinc-700 disabled:to-zinc-700 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2`}
                                     >
-                                        <Sparkles size={18} />
-                                        Generate Stylized Character
+                                        {realismMode === 'photo-real' ? <Camera size={18} /> : <Sparkles size={18} />}
+                                        {realismMode === 'photo-real' ? 'Generate Photo-Real Avatar' : 'Generate Stylized Character'}
                                     </button>
                                 </div>
                             </div>

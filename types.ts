@@ -317,6 +317,7 @@ export interface CharacterProfile {
     sourcePhoto?: string;             // Original real person photo (Base64)
     styleApplied?: string;            // ID of ProjectDefaultStyle used
     generatedFromPhoto?: boolean;     // Flag for photo-derived characters
+    photoRealMode?: boolean;          // True if generated in photo-real mode (documentary/recon)
 }
 
 // NEW: Location Profile for World Bible
