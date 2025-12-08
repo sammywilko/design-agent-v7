@@ -2,12 +2,13 @@
 // Modal for generating coverage packs for entities
 
 import React, { useState } from 'react';
-import { X, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { X, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon, Download } from 'lucide-react';
 import { CoveragePackSelector } from './CoveragePackSelector';
 import { generateCoverageLibrary, retryFailedAngles } from '../../services/coverageGenerationService';
 import { CoverageLibrary, CoverageAngle, EntityType } from '../../types/coverage';
 import { CharacterProfile, LocationProfile, ProductProfile } from '../../../types';
 import { COVERAGE_PACKS } from '../../constants/coveragePacks';
+import JSZip from 'jszip';
 
 interface CoverageGeneratorModalProps {
   isOpen: boolean;
@@ -96,6 +97,90 @@ export const CoverageGeneratorModal: React.FC<CoverageGeneratorModalProps> = ({
     }
   };
 
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadAll = async () => {
+    if (!library) return;
+
+    setIsDownloading(true);
+
+    try {
+      const zip = new JSZip();
+      const successfulAngles = library.angles.filter(a => a.status === 'success' && a.imageUrl);
+
+      // Add each image to the zip
+      for (let i = 0; i < successfulAngles.length; i++) {
+        const angle = successfulAngles[i];
+        const paddedIndex = String(i + 1).padStart(2, '0');
+        const sanitizedType = angle.type.toLowerCase().replace(/\s+/g, '-');
+        const sanitizedAngle = angle.angle.toLowerCase().replace(/\s+/g, '-');
+        const filename = `${paddedIndex}-${sanitizedType}-${sanitizedAngle}.png`;
+
+        // Convert base64 or fetch URL to blob
+        let imageData: Blob;
+        if (angle.imageUrl.startsWith('data:')) {
+          // Base64 image
+          const base64Data = angle.imageUrl.split(',')[1];
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j);
+          }
+          imageData = new Blob([bytes], { type: 'image/png' });
+        } else {
+          // URL - fetch it
+          const response = await fetch(angle.imageUrl);
+          imageData = await response.blob();
+        }
+
+        zip.file(filename, imageData);
+      }
+
+      // Add metadata JSON
+      const metadata = {
+        entityName: library.entityName,
+        entityType: library.entityType,
+        packName: library.packName,
+        generatedAt: library.createdAt,
+        totalAngles: library.angles.length,
+        successfulAngles: library.generatedAngles,
+        failedAngles: library.failedAngles,
+        generationTime: library.metadata?.totalTime,
+        angles: successfulAngles.map((angle, i) => ({
+          index: i + 1,
+          filename: `${String(i + 1).padStart(2, '0')}-${angle.type.toLowerCase().replace(/\s+/g, '-')}-${angle.angle.toLowerCase().replace(/\s+/g, '-')}.png`,
+          type: angle.type,
+          angle: angle.angle,
+          description: angle.description,
+          category: angle.category
+        }))
+      };
+
+      zip.file('metadata.json', JSON.stringify(metadata, null, 2));
+
+      // Generate and download
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const sanitizedEntityName = entityName.toLowerCase().replace(/\s+/g, '-');
+      const sanitizedPackName = library.packName.toLowerCase().replace(/\s+/g, '-');
+      const downloadName = `${sanitizedEntityName}-${sanitizedPackName}-pack.zip`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = downloadName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+    } catch (err) {
+      console.error('Download failed:', err);
+      setError('Failed to create download');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div className="bg-zinc-900 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -168,14 +253,27 @@ export const CoverageGeneratorModal: React.FC<CoverageGeneratorModalProps> = ({
                     {library.metadata?.totalTime && ` - ${library.metadata.totalTime}s total`}
                   </p>
                 </div>
-                {library.failedAngles > 0 && (
+                <div className="ml-auto flex gap-2">
+                  {library.failedAngles > 0 && (
+                    <button
+                      onClick={handleRetryFailed}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      Retry Failed ({library.failedAngles})
+                    </button>
+                  )}
                   <button
-                    onClick={handleRetryFailed}
-                    className="ml-auto px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    onClick={handleDownloadAll}
+                    disabled={isDownloading || library.generatedAngles === 0}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                   >
-                    Retry Failed ({library.failedAngles})
+                    {isDownloading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Zipping...</>
+                    ) : (
+                      <><Download className="w-4 h-4" /> Download All ({library.generatedAngles})</>
+                    )}
                   </button>
-                )}
+                </div>
               </div>
 
               {/* Angle Grid */}
