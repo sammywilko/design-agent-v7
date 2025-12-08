@@ -1343,6 +1343,8 @@ ${clips}
                 onSendToScript={handleSendToScript}
                 onSendToStoryboard={handleSendToStoryboard}
                 bibleCharacters={scriptData?.characters || []}
+                bibleLocations={scriptData?.locations || []}
+                bibleProducts={scriptData?.products || []}
                 productionDesign={scriptData?.productionDesign}
             />
         </div>

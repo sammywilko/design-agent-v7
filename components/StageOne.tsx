@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Image as ImageIcon, Loader2, Sparkles, Upload, X, Settings, User, Save, Plus, Trash2, Library, Copy, ScanEye, Folder, ChevronDown, Globe, Film, Square, Star, BookOpen, Wand2, Zap, FileText, Palette } from 'lucide-react';
 import { consultDirector, generateImage, extractStyleDNA, enhancePrompt } from '../services/gemini';
 import { db } from '../services/db';
-import { Message, GeneratedImage, DirectorResponse, AspectRatio, ImageResolution, ReferenceAsset, ReferenceType, SavedEntity, Campaign, Project, SavedPrompt, CharacterProfile, ProductionDesign } from '../types';
+import { Message, GeneratedImage, DirectorResponse, AspectRatio, ImageResolution, ReferenceAsset, ReferenceType, SavedEntity, Campaign, Project, SavedPrompt, CharacterProfile, LocationProfile, ProductProfile, ProductionDesign } from '../types';
 import ReactMarkdown from 'react-markdown';
 import CoverageModal from './CoverageModal';
 
@@ -18,6 +18,8 @@ interface StageOneProps {
   onSendToScript?: (image: GeneratedImage) => void;
   onSendToStoryboard?: (image: GeneratedImage) => void; // Quick add to storyboard
   bibleCharacters?: CharacterProfile[];
+  bibleLocations?: LocationProfile[];
+  bibleProducts?: ProductProfile[];
   productionDesign?: ProductionDesign; // Lookbook style injection
 }
 
@@ -136,6 +138,8 @@ const StageOne: React.FC<StageOneProps> = ({
     onSendToScript,
     onSendToStoryboard,
     bibleCharacters = [],
+    bibleLocations = [],
+    bibleProducts = [],
     productionDesign
 }) => {
   const [input, setInput] = useState('');
@@ -504,7 +508,12 @@ const StageOne: React.FC<StageOneProps> = ({
     const textBeforeCursor = value.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
 
-    if (atMatch && Array.isArray(bibleCharacters) && bibleCharacters.length > 0) {
+    // Show mentions if any entity type has items
+    const hasCharacters = Array.isArray(bibleCharacters) && bibleCharacters.length > 0;
+    const hasLocations = Array.isArray(bibleLocations) && bibleLocations.length > 0;
+    const hasProducts = Array.isArray(bibleProducts) && bibleProducts.length > 0;
+
+    if (atMatch && (hasCharacters || hasLocations || hasProducts)) {
       setShowMentions(true);
       setMentionFilter(atMatch[1].toLowerCase());
       setMentionCursorPos(cursorPos);
@@ -513,19 +522,28 @@ const StageOne: React.FC<StageOneProps> = ({
     }
   };
 
-  const insertMention = (character: CharacterProfile) => {
+  const insertMention = (entity: { name: string }) => {
     const textBeforeCursor = input.slice(0, mentionCursorPos);
     const textAfterCursor = input.slice(mentionCursorPos);
     const atPos = textBeforeCursor.lastIndexOf('@');
-    const newText = textBeforeCursor.slice(0, atPos) + '@' + character.name + ' ' + textAfterCursor;
+    const newText = textBeforeCursor.slice(0, atPos) + '@' + entity.name + ' ' + textAfterCursor;
     setInput(newText);
     setShowMentions(false);
   };
 
-  // Safety check for @mention filtering
+  // Safety check for @mention filtering - include all entity types
   const safeCharacters = Array.isArray(bibleCharacters) ? bibleCharacters : [];
+  const safeLocations = Array.isArray(bibleLocations) ? bibleLocations : [];
+  const safeProducts = Array.isArray(bibleProducts) ? bibleProducts : [];
+
   const filteredCharacters = safeCharacters.filter(c =>
     c.name.toLowerCase().includes(mentionFilter)
+  );
+  const filteredLocations = safeLocations.filter(l =>
+    l.name.toLowerCase().includes(mentionFilter)
+  );
+  const filteredProducts = safeProducts.filter(p =>
+    p.name.toLowerCase().includes(mentionFilter)
   );
 
   // Parse @mentions and inject character references
@@ -594,11 +612,117 @@ const StageOne: React.FC<StageOneProps> = ({
     return injectedRefs;
   };
 
+  // Parse @mentions and inject location references
+  const parseAndInjectLocationMentions = (): ReferenceAsset[] => {
+    const injectedRefs: ReferenceAsset[] = [];
+    const lowerInput = input.toLowerCase();
+
+    // Safety check: ensure bibleLocations is an array
+    const locations = Array.isArray(bibleLocations) ? bibleLocations : [];
+
+    // Check each Bible location to see if they're mentioned
+    for (const location of locations) {
+      const mentionPattern = '@' + location.name.toLowerCase();
+      if (!lowerInput.includes(mentionPattern)) continue;
+
+      // Collect all available refs for this location
+      const allRefs: string[] = [];
+
+      // Priority 1: Anchor Image (master plate)
+      if (location.anchorImage) {
+        allRefs.push(location.anchorImage);
+      }
+
+      // Priority 2: Image refs
+      if (location.imageRefs && location.imageRefs.length > 0) {
+        allRefs.push(...location.imageRefs);
+      }
+
+      // Deduplicate and limit to 3 refs
+      const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
+
+      if (uniqueRefs.length > 0) {
+        // Add first reference with prompt snippet
+        injectedRefs.push({
+          id: `mention-loc-${location.id}`,
+          data: uniqueRefs[0],
+          type: 'Location' as ReferenceType,
+          name: location.name,
+          styleDescription: location.promptSnippet
+        });
+
+        // Add additional refs for better consistency
+        for (let i = 1; i < uniqueRefs.length; i++) {
+          injectedRefs.push({
+            id: `mention-loc-${location.id}-${i}`,
+            data: uniqueRefs[i],
+            type: 'Location' as ReferenceType,
+            name: `${location.name} (ref ${i + 1})`
+          });
+        }
+      }
+    }
+
+    return injectedRefs;
+  };
+
+  // Parse @mentions and inject product references
+  const parseAndInjectProductMentions = (): ReferenceAsset[] => {
+    const injectedRefs: ReferenceAsset[] = [];
+    const lowerInput = input.toLowerCase();
+
+    // Safety check: ensure bibleProducts is an array
+    const products = Array.isArray(bibleProducts) ? bibleProducts : [];
+
+    // Check each Bible product to see if they're mentioned
+    for (const product of products) {
+      const mentionPattern = '@' + product.name.toLowerCase();
+      if (!lowerInput.includes(mentionPattern)) continue;
+
+      // Collect all available refs for this product
+      const allRefs: string[] = [];
+
+      // Priority 1: Image refs
+      if (product.imageRefs && product.imageRefs.length > 0) {
+        allRefs.push(...product.imageRefs);
+      }
+
+      // Deduplicate and limit to 3 refs
+      const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
+
+      if (uniqueRefs.length > 0) {
+        // Add first reference with prompt snippet
+        injectedRefs.push({
+          id: `mention-prod-${product.id}`,
+          data: uniqueRefs[0],
+          type: 'Product' as ReferenceType,
+          name: product.name,
+          styleDescription: product.promptSnippet
+        });
+
+        // Add additional refs for better consistency
+        for (let i = 1; i < uniqueRefs.length; i++) {
+          injectedRefs.push({
+            id: `mention-prod-${product.id}-${i}`,
+            data: uniqueRefs[i],
+            type: 'Product' as ReferenceType,
+            name: `${product.name} (ref ${i + 1})`
+          });
+        }
+      }
+    }
+
+    return injectedRefs;
+  };
+
   const handleSend = async () => {
     if ((!input.trim() && references.length === 0) || isProcessing) return;
 
-    // Inject @mentioned character references
-    const mentionRefs = parseAndInjectMentions();
+    // Inject @mentioned references (characters, locations, products)
+    const characterMentionRefs = parseAndInjectMentions();
+    const locationMentionRefs = parseAndInjectLocationMentions();
+    const productMentionRefs = parseAndInjectProductMentions();
+    const mentionRefs = [...characterMentionRefs, ...locationMentionRefs, ...productMentionRefs];
     
     // Inject Production Design style references (moodboard images) - only if Lookbook is enabled
     const styleRefs: ReferenceAsset[] = [];
@@ -988,30 +1112,85 @@ const StageOne: React.FC<StageOneProps> = ({
                 <button onClick={() => fileInputRef.current?.click()} className={`p-4 rounded-2xl transition-all relative group shadow-lg border border-white/5 ${references.length === 0 ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-zinc-900 text-zinc-500'}`} title="Upload Reference"><Plus className="w-6 h-6" />{references.length === 0 && <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-violet-500"></span></span>}</button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={handleFileUpload} />
               <div className="flex-1 relative group">
-                  <textarea value={input} onChange={handleInputChange} onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}} placeholder="Describe your vision... (Type @ to mention Bible characters)" className="w-full bg-zinc-900/50 border border-white/5 text-white rounded-2xl p-5 pr-20 resize-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 focus:outline-none min-h-[70px] max-h-[160px] shadow-inner transition-all placeholder:text-zinc-600 backdrop-blur-sm" rows={1} />
+                  <textarea value={input} onChange={handleInputChange} onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}} placeholder="Describe your vision... (Type @ to mention characters, locations, products)" className="w-full bg-zinc-900/50 border border-white/5 text-white rounded-2xl p-5 pr-20 resize-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 focus:outline-none min-h-[70px] max-h-[160px] shadow-inner transition-all placeholder:text-zinc-600 backdrop-blur-sm" rows={1} />
                   {/* @mention autocomplete dropdown */}
-                  {showMentions && filteredCharacters.length > 0 && (
-                      <div className="absolute bottom-full mb-2 left-0 w-72 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-in slide-in-from-bottom-2">
-                          <div className="px-3 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-white/5 bg-zinc-800/50">Bible Characters</div>
-                          <div className="max-h-48 overflow-y-auto">
-                              {filteredCharacters.slice(0, 6).map(char => (
-                                  <button
-                                      key={char.id}
-                                      onClick={() => insertMention(char)}
-                                      className="w-full px-3 py-2 flex items-center gap-3 hover:bg-violet-500/20 transition-colors text-left"
-                                  >
-                                      {char.imageRefs && char.imageRefs.length > 0 ? (
-                                          <img src={char.imageRefs[0]} alt={char.name} className="w-8 h-8 rounded-lg object-cover border border-white/10" />
-                                      ) : (
-                                          <div className="w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center text-zinc-400 text-xs font-bold">{char.name[0]}</div>
-                                      )}
-                                      <div className="flex-1 min-w-0">
-                                          <div className="text-sm font-medium text-white truncate">{char.name}</div>
-                                          {char.promptSnippet && <div className="text-[10px] text-zinc-500 truncate">{char.promptSnippet.slice(0, 40)}...</div>}
-                                      </div>
-                                  </button>
-                              ))}
-                          </div>
+                  {showMentions && (filteredCharacters.length > 0 || filteredLocations.length > 0 || filteredProducts.length > 0) && (
+                      <div className="absolute bottom-full mb-2 left-0 w-72 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-in slide-in-from-bottom-2 max-h-64 overflow-y-auto">
+                          {/* Characters Section */}
+                          {filteredCharacters.length > 0 && (
+                              <>
+                                  <div className="px-3 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-white/5 bg-zinc-800/50 flex items-center gap-2">
+                                      <User className="w-3 h-3 text-emerald-400" /> Characters
+                                  </div>
+                                  {filteredCharacters.slice(0, 4).map(char => (
+                                      <button
+                                          key={char.id}
+                                          onClick={() => insertMention(char)}
+                                          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-emerald-500/20 transition-colors text-left"
+                                      >
+                                          {char.imageRefs && char.imageRefs.length > 0 ? (
+                                              <img src={char.imageRefs[0]} alt={char.name} className="w-8 h-8 rounded-lg object-cover border border-emerald-500/30" />
+                                          ) : (
+                                              <div className="w-8 h-8 rounded-lg bg-emerald-900/50 flex items-center justify-center text-emerald-400 text-xs font-bold border border-emerald-500/30">{char.name[0]}</div>
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                              <div className="text-sm font-medium text-white truncate">{char.name}</div>
+                                              {char.promptSnippet && <div className="text-[10px] text-zinc-500 truncate">{char.promptSnippet.slice(0, 35)}...</div>}
+                                          </div>
+                                      </button>
+                                  ))}
+                              </>
+                          )}
+                          {/* Locations Section */}
+                          {filteredLocations.length > 0 && (
+                              <>
+                                  <div className="px-3 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-white/5 bg-zinc-800/50 flex items-center gap-2">
+                                      <Globe className="w-3 h-3 text-blue-400" /> Locations
+                                  </div>
+                                  {filteredLocations.slice(0, 4).map(loc => (
+                                      <button
+                                          key={loc.id}
+                                          onClick={() => insertMention(loc)}
+                                          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-blue-500/20 transition-colors text-left"
+                                      >
+                                          {(loc.anchorImage || (loc.imageRefs && loc.imageRefs.length > 0)) ? (
+                                              <img src={loc.anchorImage || loc.imageRefs![0]} alt={loc.name} className="w-8 h-8 rounded-lg object-cover border border-blue-500/30" />
+                                          ) : (
+                                              <div className="w-8 h-8 rounded-lg bg-blue-900/50 flex items-center justify-center text-blue-400 text-xs font-bold border border-blue-500/30">{loc.name[0]}</div>
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                              <div className="text-sm font-medium text-white truncate">{loc.name}</div>
+                                              {loc.promptSnippet && <div className="text-[10px] text-zinc-500 truncate">{loc.promptSnippet.slice(0, 35)}...</div>}
+                                          </div>
+                                      </button>
+                                  ))}
+                              </>
+                          )}
+                          {/* Products Section */}
+                          {filteredProducts.length > 0 && (
+                              <>
+                                  <div className="px-3 py-2 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-white/5 bg-zinc-800/50 flex items-center gap-2">
+                                      <Star className="w-3 h-3 text-amber-400" /> Products
+                                  </div>
+                                  {filteredProducts.slice(0, 4).map(prod => (
+                                      <button
+                                          key={prod.id}
+                                          onClick={() => insertMention(prod)}
+                                          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-amber-500/20 transition-colors text-left"
+                                      >
+                                          {prod.imageRefs && prod.imageRefs.length > 0 ? (
+                                              <img src={prod.imageRefs[0]} alt={prod.name} className="w-8 h-8 rounded-lg object-cover border border-amber-500/30" />
+                                          ) : (
+                                              <div className="w-8 h-8 rounded-lg bg-amber-900/50 flex items-center justify-center text-amber-400 text-xs font-bold border border-amber-500/30">{prod.name[0]}</div>
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                              <div className="text-sm font-medium text-white truncate">{prod.name}</div>
+                                              {prod.promptSnippet && <div className="text-[10px] text-zinc-500 truncate">{prod.promptSnippet.slice(0, 35)}...</div>}
+                                          </div>
+                                      </button>
+                                  ))}
+                              </>
+                          )}
                       </div>
                   )}
                   <div className="absolute right-4 top-4 flex gap-1">
