@@ -14,7 +14,7 @@ import ProducerChat from './components/ProducerChat';
 import CollaborationPanel from './components/CollaborationPanel';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
-import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage } from './types';
+import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage, ReferenceAsset, ReferenceType } from './types';
 import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2 } from 'lucide-react';
 import { db } from './services/db';
 import { generateCharacterSheet, generateExpressionBank, generateImage } from './services/gemini';
@@ -709,10 +709,20 @@ const App: React.FC = () => {
       }
   };
 
-  // Coverage Pack Image Generation - simple wrapper for the coverage system
-  const handleGenerateCoverageImage = async (prompt: string): Promise<string> => {
+  // Coverage Pack Image Generation - uses reference images for consistency
+  const handleGenerateCoverageImage = async (prompt: string, referenceImages?: string[]): Promise<string> => {
       try {
-          const result = await generateImage(prompt, [], {
+          // Convert reference image URLs/base64 to ReferenceAsset format
+          const references: ReferenceAsset[] = (referenceImages || []).slice(0, 3).map((img, idx) => ({
+              id: `ref-${idx}`,
+              data: img, // Can be URL or base64
+              type: 'Character' as ReferenceType,
+              name: `Reference ${idx + 1}`
+          }));
+
+          console.log(`Generating coverage image with ${references.length} references`);
+
+          const result = await generateImage(prompt, references, {
               aspectRatio: '1:1',
               resolution: '1024x1024'
           });

@@ -35,7 +35,7 @@ import { CharacterProfile, LocationProfile, ProductProfile } from '../../types';
  */
 export async function generateCoverageLibrary(
   request: CoverageGenerationRequest,
-  generateImageFn: (prompt: string) => Promise<string>
+  generateImageFn: (prompt: string, referenceImages?: string[]) => Promise<string>
 ): Promise<CoverageLibrary> {
 
   const {
@@ -61,6 +61,21 @@ export async function generateCoverageLibrary(
 
   console.log(`Generating ${pack.name} for ${entityType}: ${entityName}`);
 
+  // Get reference images from entity
+  let referenceImages: string[] = [];
+  if (entityType === 'character') {
+    const char = entity as CharacterProfile;
+    referenceImages = char.imageRefs || [];
+  } else if (entityType === 'product') {
+    const prod = entity as ProductProfile;
+    referenceImages = prod.imageRefs || [];
+  } else if (entityType === 'location') {
+    const loc = entity as LocationProfile;
+    referenceImages = loc.imageRefs || [];
+  }
+
+  console.log(`Using ${referenceImages.length} reference images for consistency`);
+
   // Build prompts for each angle
   const prompts = pack.angles.map(angle => {
     let basePrompt = '';
@@ -68,7 +83,9 @@ export async function generateCoverageLibrary(
     // Entity-specific prompt building
     if (entityType === 'character') {
       const char = entity as CharacterProfile;
-      basePrompt = char.promptSnippet || char.description;
+      // Include character name and description for better consistency
+      const namePrefix = char.name ? `${char.name}, ` : '';
+      basePrompt = namePrefix + (char.promptSnippet || char.description || 'character');
     } else if (entityType === 'product') {
       const prod = entity as ProductProfile;
       basePrompt = `${prod.name}, ${prod.promptSnippet || prod.description}`;
@@ -77,8 +94,9 @@ export async function generateCoverageLibrary(
       basePrompt = loc.promptSnippet || `${loc.name || ''} ${loc.description}`.trim();
     }
 
-    // Add angle specifications
+    // Add angle specifications with explicit instruction to match reference
     const anglePrompt = `${basePrompt}. ${angle.description}.
+IMPORTANT: Generate this EXACT same character/subject from the reference image(s) in a new pose/angle.
 Professional cinematography, ${options.resolution || '4K'}, ${angle.type} shot, ${angle.angle}.`;
 
     // Add optional atmosphere controls
@@ -92,6 +110,11 @@ Professional cinematography, ${options.resolution || '4K'}, ${angle.type} shot, 
 
     return finalPrompt;
   });
+
+  // Create a wrapper function that includes reference images
+  const generateWithRefs = async (prompt: string): Promise<string> => {
+    return generateImageFn(prompt, referenceImages);
+  };
 
   // Initialize library
   const library: CoverageLibrary = {
@@ -113,10 +136,10 @@ Professional cinematography, ${options.resolution || '4K'}, ${angle.type} shot, 
   const startTime = Date.now();
 
   try {
-    // Generate batch
+    // Generate batch using wrapper that includes reference images
     const results: BatchResult[] = await generateBatch(
       prompts,
-      generateImageFn,
+      generateWithRefs,
       {
         batchSize: options.maxConcurrent || 10,
         onProgress: (completed, total) => {

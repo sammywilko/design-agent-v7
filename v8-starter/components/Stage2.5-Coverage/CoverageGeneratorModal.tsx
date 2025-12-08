@@ -14,7 +14,7 @@ interface CoverageGeneratorModalProps {
   onClose: () => void;
   entity: CharacterProfile | LocationProfile | ProductProfile;
   entityType: EntityType;
-  generateImageFn: (prompt: string) => Promise<string>;
+  generateImageFn: (prompt: string, referenceImages?: string[]) => Promise<string>;
   onComplete?: (library: CoverageLibrary) => void;
 }
 
