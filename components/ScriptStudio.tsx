@@ -2344,6 +2344,25 @@ Example:
                                             )}
                                             <p className="text-[9px] text-zinc-600 mt-1">Master plate ensures all beat generations match this exact environment.</p>
                                         </div>
+
+                                        {/* Coverage Pack Generator */}
+                                        {onGenerateCoverageImage && (
+                                            <div className="bg-zinc-800/50 rounded-xl p-3 border border-zinc-700/50">
+                                                <h4 className="text-[10px] font-bold text-cyan-400 mb-2 flex items-center gap-1.5">
+                                                    <Images className="w-3 h-3"/>
+                                                    Coverage Pack
+                                                </h4>
+                                                <button
+                                                    onClick={() => setCoverageEntity({ entity: loc, type: 'location' })}
+                                                    className="w-full py-2 bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-600/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                                                >
+                                                    <Images className="w-3 h-3"/> Generate Coverage Pack
+                                                </button>
+                                                <p className="text-[8px] text-zinc-600 mt-2">
+                                                    Generate 8-12 angles: establishing, details, atmosphere shots.
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -2419,6 +2438,25 @@ Example:
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Sparkles className="w-3 h-3"/> AI Prompt Snippet</label>
                                             <input type="text" value={prod.promptSnippet || ''} onChange={(e) => updateProduct(prod.id, 'promptSnippet', e.target.value)} placeholder="Optimized product prompt..." className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-amber-300 focus:border-amber-500 outline-none mt-1"/>
                                         </div>
+
+                                        {/* Coverage Pack Generator */}
+                                        {onGenerateCoverageImage && (
+                                            <div className="bg-zinc-800/50 rounded-xl p-3 border border-zinc-700/50">
+                                                <h4 className="text-[10px] font-bold text-cyan-400 mb-2 flex items-center gap-1.5">
+                                                    <Images className="w-3 h-3"/>
+                                                    Coverage Pack
+                                                </h4>
+                                                <button
+                                                    onClick={() => setCoverageEntity({ entity: prod, type: 'product' })}
+                                                    className="w-full py-2 bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-600/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                                                >
+                                                    <Images className="w-3 h-3"/> Generate Coverage Pack
+                                                </button>
+                                                <p className="text-[8px] text-zinc-600 mt-2">
+                                                    Generate 3-6 angles: turnaround, hero shots, detail close-ups.
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             );
