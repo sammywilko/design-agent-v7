@@ -35,7 +35,7 @@ import { CharacterProfile, LocationProfile, ProductProfile } from '../../types';
  */
 export async function generateCoverageLibrary(
   request: CoverageGenerationRequest,
-  generateImageFn: (prompt: string, referenceImages?: string[]) => Promise<string>
+  generateImageFn: (prompt: string, referenceImages?: string[], aspectRatio?: string) => Promise<string>
 ): Promise<CoverageLibrary> {
 
   const {
@@ -111,9 +111,15 @@ Professional cinematography, ${options.resolution || '4K'}, ${angle.type} shot, 
     return finalPrompt;
   });
 
-  // Create a wrapper function that includes reference images
+  // Determine aspect ratio based on entity type
+  // Locations use 16:9 (cinematic), Characters/Products use 1:1 (portrait/product)
+  const aspectRatio = entityType === 'location' ? '16:9' : '1:1';
+
+  console.log(`Using aspect ratio: ${aspectRatio} for ${entityType}`);
+
+  // Create a wrapper function that includes reference images and aspect ratio
   const generateWithRefs = async (prompt: string): Promise<string> => {
-    return generateImageFn(prompt, referenceImages);
+    return generateImageFn(prompt, referenceImages, aspectRatio);
   };
 
   // Initialize library

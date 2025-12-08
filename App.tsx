@@ -710,7 +710,7 @@ const App: React.FC = () => {
   };
 
   // Coverage Pack Image Generation - uses reference images for consistency
-  const handleGenerateCoverageImage = async (prompt: string, referenceImages?: string[]): Promise<string> => {
+  const handleGenerateCoverageImage = async (prompt: string, referenceImages?: string[], aspectRatio?: string): Promise<string> => {
       try {
           // Convert reference image URLs/base64 to ReferenceAsset format
           const references: ReferenceAsset[] = (referenceImages || []).slice(0, 3).map((img, idx) => ({
@@ -720,10 +720,13 @@ const App: React.FC = () => {
               name: `Reference ${idx + 1}`
           }));
 
-          console.log(`Generating coverage image with ${references.length} references`);
+          // Use 16:9 for locations (cinematic), 1:1 for characters/products
+          const finalAspectRatio = aspectRatio || '16:9';
+
+          console.log(`Generating coverage image with ${references.length} references, aspect ratio: ${finalAspectRatio}`);
 
           const result = await generateImage(prompt, references, {
-              aspectRatio: '1:1',
+              aspectRatio: finalAspectRatio as any,
               resolution: '1024x1024'
           });
           return result.url;

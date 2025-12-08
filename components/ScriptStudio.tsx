@@ -22,7 +22,7 @@ interface ScriptStudioProps {
   incomingCharacter?: GeneratedImage | null;
   moodBoards?: MoodBoard[];
   onSaveVariantToHistory?: (variant: GeneratedImage) => void;
-  onGenerateCoverageImage?: (prompt: string, referenceImages?: string[]) => Promise<string>;
+  onGenerateCoverageImage?: (prompt: string, referenceImages?: string[], aspectRatio?: string) => Promise<string>;
 }
 
 const ScriptStudio: React.FC<ScriptStudioProps> = ({
