@@ -1353,7 +1353,7 @@ export const analyzeImageCoverage = async (
   characterVisuals: string
 ): Promise<CoverageAnalysis> => {
   try {
-    const ai = getAI();
+    const ai = await getClient();
     const model = 'gemini-2.5-flash'; // Vision capable, fast
 
     // Build multimodal prompt with all existing reference images
@@ -1446,7 +1446,7 @@ export const generateMissingReference = async (
   console.log('   - Existing references:', existingReferences.length);
 
   try {
-    const ai = getAI();
+    const ai = await getClient();
     const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro for image gen
 
     // Build multimodal prompt with existing references
@@ -1520,7 +1520,7 @@ export const generateCharacterAvatar = async (
   styleContext?: string
 ): Promise<string | null> => {
   try {
-    const ai = getAI();
+    const ai = await getClient();
     const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro
 
     const prompt = `CHARACTER DESIGN PORTRAIT
@@ -1582,7 +1582,7 @@ export const analyzeCharacterFromImage = async (
   characterName?: string
 ): Promise<CharacterAnalysisResult> => {
   try {
-    const ai = getAI();
+    const ai = await getClient();
     const model = 'gemini-2.5-flash'; // Vision capable, fast
 
     // Clean base64 data
