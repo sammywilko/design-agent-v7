@@ -1563,6 +1563,100 @@ This is a CHARACTER REFERENCE, not a scene. Focus on the character.`;
 };
 
 /**
+ * Character Analysis Result from Gemini Vision
+ */
+export interface CharacterAnalysisResult {
+  visualDescription: string;
+  promptSnippet: string;
+  consistencyAnchors: string;
+}
+
+/**
+ * Analyze a character image using Gemini Vision and extract:
+ * - Visual Description (detailed)
+ * - AI Prompt Snippet (optimized for image generation)
+ * - Consistency Anchors (unique identifying features)
+ */
+export const analyzeCharacterFromImage = async (
+  imageBase64: string,
+  characterName?: string
+): Promise<CharacterAnalysisResult> => {
+  try {
+    const ai = getAI();
+    const model = 'gemini-2.5-flash'; // Vision capable, fast
+
+    // Clean base64 data
+    const cleanData = imageBase64.includes(',')
+      ? imageBase64.split(',')[1]
+      : imageBase64;
+
+    const parts: Part[] = [
+      { inlineData: { mimeType: 'image/png', data: cleanData } },
+      {
+        text: `You are a CHARACTER DESIGN ANALYST for AI-generated imagery.
+
+Analyze this character image and provide:
+
+1. VISUAL DESCRIPTION (2-3 sentences):
+   - Physical appearance (age, build, hair, eyes, skin)
+   - Clothing and style
+   - Overall aesthetic/vibe
+
+2. AI PROMPT SNIPPET (1-2 sentences, max 100 words):
+   - Optimized text for AI image generation
+   - Include key visual elements in efficient prompt format
+   - Focus on reproducibility
+
+3. CONSISTENCY ANCHORS (comma-separated list):
+   - Unique identifying features that MUST stay consistent
+   - Hair style/color, eye color, distinctive clothing
+   - Scars, tattoos, accessories, signature items
+   - Things that make this character recognizable
+
+${characterName ? `Character Name: ${characterName}` : ''}
+
+OUTPUT FORMAT (JSON only, no markdown):
+{
+  "visualDescription": "...",
+  "promptSnippet": "...",
+  "consistencyAnchors": "..."
+}`
+      }
+    ];
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: { parts }
+    });
+
+    const text = response.text;
+    if (!text) throw new Error('No analysis returned');
+
+    // Parse JSON response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const analysis = JSON.parse(jsonMatch[0]);
+      console.log('🎭 Character Analysis:', analysis);
+      return {
+        visualDescription: analysis.visualDescription || '',
+        promptSnippet: analysis.promptSnippet || '',
+        consistencyAnchors: analysis.consistencyAnchors || ''
+      };
+    }
+
+    throw new Error('Could not parse analysis response');
+
+  } catch (error) {
+    console.error('Character analysis failed:', error);
+    return {
+      visualDescription: '',
+      promptSnippet: '',
+      consistencyAnchors: ''
+    };
+  }
+};
+
+/**
  * Generate a character turnaround sheet (2x2 grid with front, 3/4, side, back views).
  */
 export const generateCharacterSheet = async (

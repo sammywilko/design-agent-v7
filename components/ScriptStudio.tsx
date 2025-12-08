@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers, Images } from 'lucide-react';
 import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard } from '../types';
-import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar } from '../services/gemini';
+import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar, analyzeCharacterFromImage } from '../services/gemini';
 import { db } from '../services/db';
 import ReactMarkdown from 'react-markdown';
 import VariantExplorer from './VariantExplorer';
@@ -67,6 +67,9 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
   const [analyzingCoverageFor, setAnalyzingCoverageFor] = useState<string | null>(null);
   const [generatingRefFor, setGeneratingRefFor] = useState<{charId: string, view: string} | null>(null);
   const [generatingAvatarFor, setGeneratingAvatarFor] = useState<string | null>(null);
+
+  // Auto-analyze character from uploaded image
+  const [autoAnalyzingCharId, setAutoAnalyzingCharId] = useState<string | null>(null);
 
   // Beat Editing State
   const [editingBeatId, setEditingBeatId] = useState<string | null>(null);
@@ -594,11 +597,36 @@ Generate 2-5 shots that tell this beat cinematically.`;
               });
           });
 
-          Promise.all(readPromises).then(results => {
+          Promise.all(readPromises).then(async (results) => {
               if (entityType === 'character') {
                   const char = characters.find(c => c.id === entityId);
                   const newRefs = append && char?.imageRefs ? [...char.imageRefs, ...results] : results;
                   updateCharacter(entityId, 'imageRefs', newRefs);
+
+                  // Auto-analyze first uploaded image if character has no description yet
+                  if (results.length > 0 && char && !char.description?.trim()) {
+                      setAutoAnalyzingCharId(entityId);
+                      try {
+                          const analysis = await analyzeCharacterFromImage(results[0], char.name);
+                          if (analysis.visualDescription || analysis.promptSnippet || analysis.consistencyAnchors) {
+                              // Update character with analyzed data
+                              if (analysis.visualDescription) {
+                                  updateCharacter(entityId, 'description', analysis.visualDescription);
+                              }
+                              if (analysis.promptSnippet) {
+                                  updateCharacter(entityId, 'promptSnippet', analysis.promptSnippet);
+                              }
+                              if (analysis.consistencyAnchors) {
+                                  updateCharacter(entityId, 'consistencyAnchors', analysis.consistencyAnchors);
+                              }
+                              showNotification(`Auto-analyzed ${char.name}!`);
+                          }
+                      } catch (err) {
+                          console.error('Auto-analysis failed:', err);
+                      } finally {
+                          setAutoAnalyzingCharId(null);
+                      }
+                  }
               } else if (entityType === 'location') {
                   const loc = locations.find(l => l.id === entityId);
                   const newRefs = append && loc?.imageRefs ? [...loc.imageRefs, ...results] : results;
@@ -1773,22 +1801,50 @@ Example:
                                     </div>
 
                                     <div className="flex-1 p-4 space-y-3 overflow-y-auto min-h-0">
+                                        {/* Auto-Analysis Loading Indicator */}
+                                        {autoAnalyzingCharId === char.id && (
+                                            <div className="flex items-center gap-2 p-2 bg-violet-500/10 border border-violet-500/30 rounded-lg">
+                                                <Loader2 className="w-4 h-4 text-violet-400 animate-spin"/>
+                                                <span className="text-xs text-violet-300">Analyzing image with Gemini Vision...</span>
+                                            </div>
+                                        )}
+
                                         {/* Visual Description */}
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase">Visual Description</label>
-                                            <textarea value={char.description} onChange={(e) => updateCharacter(char.id, 'description', e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-emerald-500 outline-none resize-none h-14 mt-1"/>
+                                            <textarea
+                                                value={char.description}
+                                                onChange={(e) => updateCharacter(char.id, 'description', e.target.value)}
+                                                placeholder={autoAnalyzingCharId === char.id ? "Analyzing..." : "Character appearance details..."}
+                                                disabled={autoAnalyzingCharId === char.id}
+                                                className={`w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-emerald-500 outline-none resize-none h-14 mt-1 ${autoAnalyzingCharId === char.id ? 'animate-pulse opacity-60' : ''}`}
+                                            />
                                         </div>
-                                        
+
                                         {/* AI Prompt Snippet */}
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Sparkles className="w-3 h-3"/> AI Prompt Snippet</label>
-                                            <input type="text" value={char.promptSnippet || ''} onChange={(e) => updateCharacter(char.id, 'promptSnippet', e.target.value)} placeholder="Short, optimized prompt text..." className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-emerald-300 focus:border-emerald-500 outline-none mt-1"/>
+                                            <input
+                                                type="text"
+                                                value={char.promptSnippet || ''}
+                                                onChange={(e) => updateCharacter(char.id, 'promptSnippet', e.target.value)}
+                                                placeholder={autoAnalyzingCharId === char.id ? "Analyzing..." : "Short, optimized prompt text..."}
+                                                disabled={autoAnalyzingCharId === char.id}
+                                                className={`w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-emerald-300 focus:border-emerald-500 outline-none mt-1 ${autoAnalyzingCharId === char.id ? 'animate-pulse opacity-60' : ''}`}
+                                            />
                                         </div>
-                                        
+
                                         {/* Consistency Anchors */}
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1"><Lock className="w-3 h-3"/> Consistency Anchors</label>
-                                            <input type="text" value={char.consistencyAnchors || ''} onChange={(e) => updateCharacter(char.id, 'consistencyAnchors', e.target.value)} placeholder="e.g. Scar on left cheek, Red scarf" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-emerald-500 outline-none mt-1"/>
+                                            <input
+                                                type="text"
+                                                value={char.consistencyAnchors || ''}
+                                                onChange={(e) => updateCharacter(char.id, 'consistencyAnchors', e.target.value)}
+                                                placeholder={autoAnalyzingCharId === char.id ? "Analyzing..." : "e.g. Scar on left cheek, Red scarf"}
+                                                disabled={autoAnalyzingCharId === char.id}
+                                                className={`w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:border-emerald-500 outline-none mt-1 ${autoAnalyzingCharId === char.id ? 'animate-pulse opacity-60' : ''}`}
+                                            />
                                         </div>
                                         
                                         {/* Action Buttons Row */}
