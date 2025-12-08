@@ -17,7 +17,7 @@ import { useCollaboration } from './hooks/useCollaboration';
 import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage } from './types';
 import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2 } from 'lucide-react';
 import { db } from './services/db';
-import { generateCharacterSheet, generateExpressionBank } from './services/gemini';
+import { generateCharacterSheet, generateExpressionBank, generateImage } from './services/gemini';
 import { generateThumbnail } from './services/imageUtils';
 import { analyzeImage, extractStyleDNA, ensureThumbnail } from './services/moodBoardService';
 import JSZip from 'jszip';
@@ -709,6 +709,20 @@ const App: React.FC = () => {
       }
   };
 
+  // Coverage Pack Image Generation - simple wrapper for the coverage system
+  const handleGenerateCoverageImage = async (prompt: string): Promise<string> => {
+      try {
+          const result = await generateImage(prompt, [], {
+              aspectRatio: '1:1',
+              resolution: '1024x1024'
+          });
+          return result.url;
+      } catch (error) {
+          console.error('Coverage image generation failed:', error);
+          throw error;
+      }
+  };
+
   const handleImageSelect = (image: GeneratedImage) => {
     addToGlobalHistory(image);
     setWorkingImage(image);
@@ -1300,6 +1314,7 @@ ${clips}
                 incomingCharacter={incomingCharacter}
                 moodBoards={moodBoards}
                 onSaveVariantToHistory={(variant) => addToGlobalHistory(variant)}
+                onGenerateCoverageImage={handleGenerateCoverageImage}
             />
         </div>
 

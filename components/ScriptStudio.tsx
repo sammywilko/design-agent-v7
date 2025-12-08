@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers } from 'lucide-react';
+import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers, Images } from 'lucide-react';
 import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard } from '../types';
 import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar } from '../services/gemini';
 import { db } from '../services/db';
 import ReactMarkdown from 'react-markdown';
 import VariantExplorer from './VariantExplorer';
+import { CoverageGeneratorModal } from '../v8-starter/components/Stage2.5-Coverage/CoverageGeneratorModal';
+import { CoverageLibrary, EntityType } from '../v8-starter/types/coverage';
 
 interface ScriptStudioProps {
   currentProject: Project;
@@ -20,6 +22,7 @@ interface ScriptStudioProps {
   incomingCharacter?: GeneratedImage | null;
   moodBoards?: MoodBoard[];
   onSaveVariantToHistory?: (variant: GeneratedImage) => void;
+  onGenerateCoverageImage?: (prompt: string) => Promise<string>;
 }
 
 const ScriptStudio: React.FC<ScriptStudioProps> = ({
@@ -34,7 +37,8 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
     onSyncStoryboard,
     incomingCharacter,
     moodBoards = [],
-    onSaveVariantToHistory
+    onSaveVariantToHistory,
+    onGenerateCoverageImage
 }) => {
   const [activeTab, setActiveTab] = useState<'script' | 'design' | 'beats' | 'characters' | 'locations' | 'products'>('script');
   
@@ -96,6 +100,9 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
 
   // Variant Explorer State
   const [exploringBeat, setExploringBeat] = useState<Beat | null>(null);
+
+  // Coverage Pack Generator State
+  const [coverageEntity, setCoverageEntity] = useState<{entity: CharacterProfile | LocationProfile | ProductProfile, type: EntityType} | null>(null);
 
   // Debounce save logic
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2108,6 +2115,25 @@ Example:
                                             </p>
                                         </div>
 
+                                        {/* Coverage Pack Generator */}
+                                        {onGenerateCoverageImage && (
+                                            <div className="bg-zinc-800/50 rounded-xl p-3 border border-zinc-700/50">
+                                                <h4 className="text-[10px] font-bold text-cyan-400 mb-2 flex items-center gap-1.5">
+                                                    <Images className="w-3 h-3"/>
+                                                    Coverage Pack
+                                                </h4>
+                                                <button
+                                                    onClick={() => setCoverageEntity({ entity: char, type: 'character' })}
+                                                    className="w-full py-2 bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-600/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                                                >
+                                                    <Images className="w-3 h-3"/> Generate Coverage Pack
+                                                </button>
+                                                <p className="text-[8px] text-zinc-600 mt-2">
+                                                    Generate 3-12 angles: turnaround, contact sheet, dialogue, or action pack.
+                                                </p>
+                                            </div>
+                                        )}
+
                                         {/* Lock Toggle */}
                                         <label className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
                                             isLocked ? 'bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/15' : 'bg-zinc-800/50 border border-zinc-700 hover:bg-zinc-800/70'
@@ -2475,6 +2501,55 @@ Example:
             }}
             onClose={() => setExploringBeat(null)}
             showNotification={showNotification}
+        />
+    )}
+
+    {/* Coverage Pack Generator Modal */}
+    {coverageEntity && onGenerateCoverageImage && (
+        <CoverageGeneratorModal
+            isOpen={true}
+            onClose={() => setCoverageEntity(null)}
+            entity={coverageEntity.entity}
+            entityType={coverageEntity.type}
+            generateImageFn={onGenerateCoverageImage}
+            onComplete={(library) => {
+                showNotification(`Generated ${library.generatedAngles} angles for ${library.entityName}`);
+                // Add generated images to entity's imageRefs
+                if (coverageEntity.type === 'character') {
+                    const newRefs = library.angles
+                        .filter(a => a.status === 'success' && a.imageUrl)
+                        .map(a => a.imageUrl);
+                    setCharacters(prev => prev.map(c => {
+                        if (c.id !== coverageEntity.entity.id) return c;
+                        return {
+                            ...c,
+                            imageRefs: [...(c.imageRefs || []), ...newRefs]
+                        };
+                    }));
+                } else if (coverageEntity.type === 'location') {
+                    const newRefs = library.angles
+                        .filter(a => a.status === 'success' && a.imageUrl)
+                        .map(a => a.imageUrl);
+                    setLocations(prev => prev.map(l => {
+                        if (l.id !== coverageEntity.entity.id) return l;
+                        return {
+                            ...l,
+                            imageRefs: [...(l.imageRefs || []), ...newRefs]
+                        };
+                    }));
+                } else if (coverageEntity.type === 'product') {
+                    const newRefs = library.angles
+                        .filter(a => a.status === 'success' && a.imageUrl)
+                        .map(a => a.imageUrl);
+                    setProducts(prev => prev.map(p => {
+                        if (p.id !== coverageEntity.entity.id) return p;
+                        return {
+                            ...p,
+                            imageRefs: [...(p.imageRefs || []), ...newRefs]
+                        };
+                    }));
+                }
+            }}
         />
     )}
     </>
