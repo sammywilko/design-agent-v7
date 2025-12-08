@@ -2609,24 +2609,37 @@ Focus on visual details that ensure consistent regeneration.`
 };
 
 /**
- * Extract character specifications from uploaded image
+ * Helper: delay for retry logic
  */
-export const extractCharacterSpecs = async (imageData: string): Promise<CharacterSpecs | null> => {
-  try {
-    const ai = await getClient();
-    const model = 'gemini-3-pro-preview';
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    const cleanData = cleanDataUrl(imageData);
-    const mimeType = getMimeType(imageData);
+/**
+ * Extract character specifications from uploaded image with retry logic
+ */
+export const extractCharacterSpecs = async (
+  imageData: string,
+  maxRetries: number = 3
+): Promise<CharacterSpecs | null> => {
+  const ai = await getClient();
+  const model = 'gemini-3-pro-preview';
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `Analyze this person/character image and extract detailed specifications for consistent regeneration.
+  const cleanData = cleanDataUrl(imageData);
+  const mimeType = getMimeType(imageData);
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`📸 Extracting character specs (attempt ${attempt}/${maxRetries})...`);
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `Analyze this person/character image and extract detailed specifications for consistent regeneration.
 
 Return a JSON object with these fields:
 - gender: Male, Female, or Non-binary
@@ -2644,46 +2657,71 @@ Return a JSON object with these fields:
 - promptSnippet: A detailed prompt snippet that would regenerate this exact person
 
 Focus on details that ensure identity consistency across multiple generations.`
-            },
-            {
-              inlineData: { data: cleanData, mimeType }
+              },
+              {
+                inlineData: { data: cleanData, mimeType }
+              }
+            ]
+          }
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              gender: { type: Type.STRING },
+              ageRange: { type: Type.STRING },
+              ethnicity: { type: Type.STRING },
+              skinTone: { type: Type.STRING },
+              hairColor: { type: Type.STRING },
+              hairStyle: { type: Type.STRING },
+              eyeColor: { type: Type.STRING },
+              facialFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
+              bodyType: { type: Type.STRING },
+              height: { type: Type.STRING },
+              distinctiveFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
+              clothing: { type: Type.STRING },
+              promptSnippet: { type: Type.STRING }
             }
-          ]
-        }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            gender: { type: Type.STRING },
-            ageRange: { type: Type.STRING },
-            ethnicity: { type: Type.STRING },
-            skinTone: { type: Type.STRING },
-            hairColor: { type: Type.STRING },
-            hairStyle: { type: Type.STRING },
-            eyeColor: { type: Type.STRING },
-            facialFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
-            bodyType: { type: Type.STRING },
-            height: { type: Type.STRING },
-            distinctiveFeatures: { type: Type.ARRAY, items: { type: Type.STRING } },
-            clothing: { type: Type.STRING },
-            promptSnippet: { type: Type.STRING }
           }
         }
+      });
+
+      const text = response.text;
+      if (!text) {
+        throw new Error('Empty response from API');
       }
-    });
 
-    const text = response.text;
-    if (!text) return null;
+      const specs = JSON.parse(text) as CharacterSpecs;
+      console.log('🔍 Extracted character specs:', specs.gender, specs.ageRange, specs.hairStyle);
+      return specs;
 
-    const specs = JSON.parse(text) as CharacterSpecs;
-    console.log('🔍 Extracted character specs:', specs.gender, specs.ageRange, specs.hairStyle);
-    return specs;
-  } catch (error) {
-    console.error('Character spec extraction failed:', error);
-    return null;
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`⚠️ Attempt ${attempt} failed:`, error);
+
+      // Check for specific error types
+      const errorMessage = (error as Error).message || '';
+
+      // Don't retry on certain errors
+      if (errorMessage.includes('INVALID_ARGUMENT') ||
+          errorMessage.includes('Invalid image') ||
+          errorMessage.includes('Could not process image')) {
+        console.error('❌ Image format/quality issue - not retrying');
+        break;
+      }
+
+      // Exponential backoff for retryable errors
+      if (attempt < maxRetries) {
+        const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+        console.log(`⏳ Waiting ${backoffMs}ms before retry...`);
+        await delay(backoffMs);
+      }
+    }
   }
+
+  console.error('❌ Character spec extraction failed after all retries:', lastError);
+  return null;
 };
 
 /**
@@ -2813,12 +2851,12 @@ export const generateStylizedCharacterFromPhoto = async (
 
   console.log('🎨 Starting Photo-to-Character stylization for:', characterName);
 
-  // Step 1: Extract specs from the real person photo
+  // Step 1: Extract specs from the real person photo (with retry logic)
   console.log('📸 Extracting character specs from photo...');
-  const extractedSpecs = await extractCharacterSpecs(realPhoto);
+  const extractedSpecs = await extractCharacterSpecs(realPhoto, 3);
 
   if (!extractedSpecs) {
-    throw new Error('Failed to extract character specs from photo');
+    throw new Error('Failed to extract character specs from photo. Please try a different image with a clear, well-lit face. Tips: Use a front-facing portrait, avoid blurry or dark images.');
   }
 
   console.log('✅ Specs extracted:', extractedSpecs.gender, extractedSpecs.ageRange, extractedSpecs.hairStyle);
