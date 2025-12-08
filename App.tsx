@@ -1348,8 +1348,8 @@ ${clips}
         </div>
         
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_2_EDITING ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <StageTwo 
-                initialImage={workingImage} 
+            <StageTwo
+                initialImage={workingImage}
                 onBack={() => setStage(AppStage.STAGE_1_CONCEPT)}
                 showNotification={showNotification}
                 onImageEdited={(img) => addToGlobalHistory(img)}
@@ -1357,6 +1357,9 @@ ${clips}
                 currentProject={currentProject}
                 onLibraryUpdate={refreshLibrary}
                 productionDesign={scriptData?.productionDesign}
+                bibleCharacters={scriptData?.characters || []}
+                bibleLocations={scriptData?.locations || []}
+                bibleProducts={scriptData?.products || []}
             />
         </div>
 

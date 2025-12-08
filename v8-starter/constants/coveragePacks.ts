@@ -371,22 +371,23 @@ export function getAllPackIds(): string[] {
 export function getPacksForEntityType(
   entityType: 'character' | 'product' | 'location'
 ): CoveragePack[] {
-  const packs = Object.values(COVERAGE_PACKS);
+  const packEntries = Object.entries(COVERAGE_PACKS);
 
   switch (entityType) {
     case 'character':
-      return packs.filter(p =>
-        ['turnaround', 'contact-sheet', 'dialogue', 'action'].includes(p.id)
-      );
+      return packEntries
+        .filter(([key]) => ['turnaround', 'contactSheet', 'dialogue', 'action'].includes(key))
+        .map(([, pack]) => pack);
     case 'product':
-      return packs.filter(p =>
-        ['turnaround', 'contact-sheet', 'product-hero'].includes(p.id)
-      );
+      return packEntries
+        .filter(([key]) => ['turnaround', 'productHero'].includes(key))
+        .map(([, pack]) => pack);
     case 'location':
-      return packs.filter(p =>
-        ['contact-sheet', 'location'].includes(p.id)
-      );
+      // Location only gets location-appropriate packs - NO contactSheet (has character shots)
+      return packEntries
+        .filter(([key]) => ['location'].includes(key))
+        .map(([, pack]) => pack);
     default:
-      return packs;
+      return Object.values(COVERAGE_PACKS);
   }
 }

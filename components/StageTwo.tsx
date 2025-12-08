@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw } from 'lucide-react';
-import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign } from '../types';
+import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
 import CoverageModal from './CoverageModal';
@@ -16,6 +16,9 @@ interface StageTwoProps {
   currentProject: Project;
   onLibraryUpdate: () => void;
   productionDesign?: ProductionDesign; // Lookbook style injection
+  bibleCharacters?: CharacterProfile[]; // For @mention support
+  bibleLocations?: LocationProfile[]; // For @mention support
+  bibleProducts?: ProductProfile[]; // For @mention support
 }
 
 const MAX_REFERENCES = 14;
@@ -34,7 +37,7 @@ const QUICK_EDITS = [
     { label: '4K Upscale', prompt: 'STRICT UPSCALE ONLY. Increase resolution to 4K. CRITICAL: Preserve EXACTLY all colors, hair color, skin tone, beard color, eye color, clothing colors, and all visual details. Do NOT alter, reinterpret, or regenerate any content. Only add subtle sharpness and micro-texture detail. This is a technical upscale, not a creative edit.', resolution: '4K' },
 ];
 
-const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotification, onImageEdited, onAddToGallery, currentProject, onLibraryUpdate, productionDesign }) => {
+const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotification, onImageEdited, onAddToGallery, currentProject, onLibraryUpdate, productionDesign, bibleCharacters = [], bibleLocations = [], bibleProducts = [] }) => {
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(initialImage);
   const [history, setHistory] = useState<GeneratedImage[]>(initialImage ? [initialImage] : []);
   const [instruction, setInstruction] = useState('');
@@ -64,7 +67,14 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
   const [critique, setCritique] = useState<string>('');
   const [isCritiquing, setIsCritiquing] = useState(false);
 
+  // @mention autocomplete state
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionCursorPos, setMentionCursorPos] = useState(0);
+  const [mentionType, setMentionType] = useState<'all' | 'character' | 'location' | 'product'>('all');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const instructionInputRef = useRef<HTMLInputElement>(null);
   const canvasInputRef = useRef<HTMLInputElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -185,10 +195,146 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
       setIsDrawing(false);
   };
 
+  // @mention autocomplete handlers
+  const handleInstructionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart || 0;
+    setInstruction(value);
+
+    // Check if we're typing an @mention
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    if (atMatch) {
+      const allEntities = [...bibleCharacters, ...bibleLocations, ...bibleProducts];
+      if (allEntities.length > 0) {
+        setShowMentions(true);
+        setMentionFilter(atMatch[1].toLowerCase());
+        setMentionCursorPos(cursorPos);
+      }
+    } else {
+      setShowMentions(false);
+    }
+  };
+
+  // Combined entities for @mention
+  const getMentionableEntities = () => {
+    const entities: Array<{ type: 'character' | 'location' | 'product'; name: string; id: string; imageRefs?: string[]; promptSnippet?: string; description?: string }> = [];
+
+    bibleCharacters.forEach(c => entities.push({ type: 'character', name: c.name, id: c.id, imageRefs: c.imageRefs, promptSnippet: c.promptSnippet, description: c.description }));
+    bibleLocations.forEach(l => entities.push({ type: 'location', name: l.name || 'Location', id: l.id, imageRefs: l.imageRefs, promptSnippet: l.promptSnippet, description: l.description }));
+    bibleProducts.forEach(p => entities.push({ type: 'product', name: p.name, id: p.id, imageRefs: p.imageRefs, promptSnippet: p.promptSnippet, description: p.description }));
+
+    return entities.filter(e => e.name.toLowerCase().includes(mentionFilter));
+  };
+
+  const insertMention = (entity: { name: string; type: string }) => {
+    const textBeforeCursor = instruction.slice(0, mentionCursorPos);
+    const textAfterCursor = instruction.slice(mentionCursorPos);
+    const atPos = textBeforeCursor.lastIndexOf('@');
+    const newText = textBeforeCursor.slice(0, atPos) + '@' + entity.name + ' ' + textAfterCursor;
+    setInstruction(newText);
+    setShowMentions(false);
+    // Re-focus input
+    instructionInputRef.current?.focus();
+  };
+
+  // Parse @mentions and inject entity references
+  const parseAndInjectMentions = (): { refs: ReferenceAsset[], context: string } => {
+    const injectedRefs: ReferenceAsset[] = [];
+    const contextParts: string[] = [];
+    const lowerInstruction = instruction.toLowerCase();
+
+    // Check characters
+    for (const char of bibleCharacters) {
+      const mentionPattern = '@' + char.name.toLowerCase();
+      if (!lowerInstruction.includes(mentionPattern)) continue;
+
+      const allRefs: string[] = [];
+      if (char.characterSheet) allRefs.push(char.characterSheet);
+      if (char.imageRefs) allRefs.push(...char.imageRefs);
+
+      const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
+      if (uniqueRefs.length > 0) {
+        uniqueRefs.forEach((ref, i) => {
+          injectedRefs.push({
+            id: `mention-char-${char.id}-${i}`,
+            data: ref,
+            type: 'Character',
+            name: i === 0 ? char.name : `${char.name} (ref ${i + 1})`,
+            styleDescription: i === 0 ? char.promptSnippet : undefined
+          });
+        });
+      }
+      if (char.promptSnippet) {
+        contextParts.push(`[${char.name}: ${char.promptSnippet}]`);
+      }
+    }
+
+    // Check locations
+    for (const loc of bibleLocations) {
+      const locName = loc.name || 'Location';
+      const mentionPattern = '@' + locName.toLowerCase();
+      if (!lowerInstruction.includes(mentionPattern)) continue;
+
+      const allRefs: string[] = [];
+      if (loc.anchorImage) allRefs.push(loc.anchorImage);
+      if (loc.imageRefs) allRefs.push(...loc.imageRefs);
+
+      const uniqueRefs = [...new Set(allRefs)].slice(0, 3);
+      if (uniqueRefs.length > 0) {
+        uniqueRefs.forEach((ref, i) => {
+          injectedRefs.push({
+            id: `mention-loc-${loc.id}-${i}`,
+            data: ref,
+            type: 'Style',
+            name: i === 0 ? locName : `${locName} (ref ${i + 1})`,
+            styleDescription: i === 0 ? loc.promptSnippet : undefined
+          });
+        });
+      }
+      if (loc.promptSnippet) {
+        contextParts.push(`[Location ${locName}: ${loc.promptSnippet}]`);
+      }
+    }
+
+    // Check products
+    for (const prod of bibleProducts) {
+      const mentionPattern = '@' + prod.name.toLowerCase();
+      if (!lowerInstruction.includes(mentionPattern)) continue;
+
+      if (prod.imageRefs && prod.imageRefs.length > 0) {
+        prod.imageRefs.slice(0, 3).forEach((ref, i) => {
+          injectedRefs.push({
+            id: `mention-prod-${prod.id}-${i}`,
+            data: ref,
+            type: 'General',
+            name: i === 0 ? prod.name : `${prod.name} (ref ${i + 1})`,
+            styleDescription: i === 0 ? prod.promptSnippet : undefined
+          });
+        });
+      }
+      if (prod.promptSnippet) {
+        contextParts.push(`[Product ${prod.name}: ${prod.promptSnippet}]`);
+      }
+    }
+
+    return {
+      refs: injectedRefs,
+      context: contextParts.length > 0 ? `\n\nEntity References: ${contextParts.join(' ')}` : ''
+    };
+  };
+
   const handleEdit = async (overrideInstruction?: string, overrideResolution?: string) => {
     let textToUse = typeof overrideInstruction === 'string' ? overrideInstruction : instruction;
-    
+
     if (!currentImage || (!textToUse.trim() && references.length === 0) || isEditing) return;
+
+    // Inject @mentioned entity references
+    const { refs: mentionRefs, context: mentionContext } = parseAndInjectMentions();
+    if (mentionContext) {
+      textToUse = textToUse + mentionContext;
+    }
 
     // Build Lookbook style context if enabled
     let styleContext = '';
@@ -220,7 +366,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
       textToUse = styleContext + textToUse;
     }
     
-    const allReferences = [...references, ...styleRefs].slice(0, MAX_REFERENCES);
+    const allReferences = [...references, ...mentionRefs, ...styleRefs].slice(0, MAX_REFERENCES);
 
     setIsEditing(true);
     const maskData = getMaskDataUrl();
@@ -1046,16 +1192,53 @@ CRITICAL REQUIREMENTS:
                />
 
                <div className="relative flex-1 group">
-                  <Wand2 className="absolute left-4 top-4 w-5 h-5 text-zinc-500 group-focus-within:text-violet-400 transition-colors" />
+                  <Wand2 className="absolute left-4 top-4 w-5 h-5 text-zinc-500 group-focus-within:text-violet-400 transition-colors z-10" />
                   <input
+                      ref={instructionInputRef}
                       type="text"
                       value={instruction}
-                      onChange={(e) => setInstruction(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleEdit()}
+                      onChange={handleInstructionChange}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !showMentions) handleEdit();
+                        if (e.key === 'Escape') setShowMentions(false);
+                      }}
                       disabled={!currentImage}
-                      placeholder={hasMask ? "Describe changes for the RED MASKED area only..." : (currentImage ? "Describe your edit (e.g., 'Make the logo neon blue', 'Change background to sunset')..." : "Upload a canvas image to start editing")}
+                      placeholder={hasMask ? "Describe changes for the RED MASKED area only..." : (currentImage ? "Type @ to add characters/locations/products, e.g., 'Add @Millie in front of @BigBen'..." : "Upload a canvas image to start editing")}
                       className={`w-full bg-zinc-800/50 border border-white/5 hover:border-white/10 text-white pl-12 pr-4 py-4 rounded-2xl focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed placeholder-zinc-500 shadow-inner ${hasMask ? 'border-red-500/30 focus:ring-red-500/30' : ''}`}
                   />
+                  {/* @mention autocomplete dropdown */}
+                  {showMentions && getMentionableEntities().length > 0 && (
+                    <div className="absolute bottom-full left-0 mb-2 w-full bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl max-h-64 overflow-y-auto z-50">
+                      <div className="p-2 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase font-bold">
+                        Bible Entities - Type to filter
+                      </div>
+                      {getMentionableEntities().slice(0, 10).map(entity => (
+                        <button
+                          key={`${entity.type}-${entity.id}`}
+                          onClick={() => insertMention(entity)}
+                          className="w-full px-4 py-3 flex items-center gap-3 hover:bg-zinc-800 transition-colors text-left border-b border-zinc-800/50 last:border-0"
+                        >
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold ${
+                            entity.type === 'character' ? 'bg-emerald-600' :
+                            entity.type === 'location' ? 'bg-blue-600' :
+                            'bg-amber-600'
+                          }`}>
+                            {entity.type === 'character' ? 'C' : entity.type === 'location' ? 'L' : 'P'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-white truncate">{entity.name}</div>
+                            <div className="text-xs text-zinc-500 truncate">
+                              {entity.type.charAt(0).toUpperCase() + entity.type.slice(1)}
+                              {entity.imageRefs && entity.imageRefs.length > 0 && ` • ${entity.imageRefs.length} refs`}
+                            </div>
+                          </div>
+                          {entity.imageRefs && entity.imageRefs[0] && (
+                            <img src={entity.imageRefs[0]} alt="" className="w-8 h-8 rounded object-cover" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                </div>
                <button
                   onClick={() => handleEdit()}

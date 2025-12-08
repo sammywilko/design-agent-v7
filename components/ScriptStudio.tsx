@@ -577,45 +577,58 @@ Generate 2-5 shots that tell this beat cinematically.`;
       }
   };
 
-  // Generic image upload handler
+  // Generic image upload handler - supports multiple files
   const handleImageUpload = (
       e: React.ChangeEvent<HTMLInputElement>,
       entityId: string,
       entityType: 'character' | 'location' | 'product',
       append: boolean = false
   ) => {
-      if (e.target.files && e.target.files[0]) {
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-              const result = ev.target?.result as string;
+      if (e.target.files && e.target.files.length > 0) {
+          const files = Array.from(e.target.files);
+          const readPromises = files.map(file => {
+              return new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => resolve(ev.target?.result as string);
+                  reader.readAsDataURL(file);
+              });
+          });
+
+          Promise.all(readPromises).then(results => {
               if (entityType === 'character') {
                   const char = characters.find(c => c.id === entityId);
-                  const newRefs = append && char?.imageRefs ? [...char.imageRefs, result] : [result];
+                  const newRefs = append && char?.imageRefs ? [...char.imageRefs, ...results] : results;
                   updateCharacter(entityId, 'imageRefs', newRefs);
               } else if (entityType === 'location') {
                   const loc = locations.find(l => l.id === entityId);
-                  const newRefs = append && loc?.imageRefs ? [...loc.imageRefs, result] : [result];
+                  const newRefs = append && loc?.imageRefs ? [...loc.imageRefs, ...results] : results;
                   updateLocation(entityId, 'imageRefs', newRefs);
               } else {
                   const prod = products.find(p => p.id === entityId);
-                  const newRefs = append && prod?.imageRefs ? [...prod.imageRefs, result] : [result];
+                  const newRefs = append && prod?.imageRefs ? [...prod.imageRefs, ...results] : results;
                   updateProduct(entityId, 'imageRefs', newRefs);
               }
-          };
-          reader.readAsDataURL(e.target.files[0]);
+          });
       }
   };
 
-  // Ref Coverage category upload handler
+  // Ref Coverage category upload handler - supports multiple files
   const handleRefCoverageUpload = (
       e: React.ChangeEvent<HTMLInputElement>,
       charId: string,
       category: keyof RefCoverage
   ) => {
-      if (e.target.files && e.target.files[0]) {
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-              const result = ev.target?.result as string;
+      if (e.target.files && e.target.files.length > 0) {
+          const files = Array.from(e.target.files);
+          const readPromises = files.map(file => {
+              return new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => resolve(ev.target?.result as string);
+                  reader.readAsDataURL(file);
+              });
+          });
+
+          Promise.all(readPromises).then(results => {
               const char = characters.find(c => c.id === charId);
               if (!char) return;
 
@@ -623,16 +636,15 @@ Generate 2-5 shots that tell this beat cinematically.`;
               const currentCategoryRefs = currentCoverage[category] || [];
               const updatedCoverage: RefCoverage = {
                   ...currentCoverage,
-                  [category]: [...currentCategoryRefs, result]
+                  [category]: [...currentCategoryRefs, ...results]
               };
 
               updateCharacter(charId, 'refCoverage', updatedCoverage);
 
               // Also add to general imageRefs for backwards compatibility
-              const newRefs = [...(char.imageRefs || []), result];
+              const newRefs = [...(char.imageRefs || []), ...results];
               updateCharacter(charId, 'imageRefs', newRefs);
-          };
-          reader.readAsDataURL(e.target.files[0]);
+          });
       }
   };
 
@@ -1691,12 +1703,18 @@ Example:
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center"><Users className="w-8 h-8 text-zinc-600" /></div>
                             <div className="flex w-full gap-2">
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     list="character-suggestions"
-                                    value={newCharName} 
-                                    onChange={(e) => setNewCharName(e.target.value)} 
-                                    placeholder="Character Name" 
+                                    value={newCharName}
+                                    onChange={(e) => setNewCharName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && newCharName.trim()) {
+                                            addCharacter();
+                                            e.preventDefault();
+                                        }
+                                    }}
+                                    placeholder="Character Name"
                                     className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 outline-none text-white"
                                 />
                                 <datalist id="character-suggestions">
@@ -1879,7 +1897,7 @@ Example:
                                                             </label>
                                                             <label className="p-1 bg-zinc-800 hover:bg-emerald-600 rounded cursor-pointer transition-colors">
                                                                 <Plus className="w-3 h-3 text-zinc-400 hover:text-white"/>
-                                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleRefCoverageUpload(e, char.id, 'face')} />
+                                                                <input type="file" className="hidden" accept="image/*" multiple onChange={(e) => handleRefCoverageUpload(e, char.id, 'face')} />
                                                             </label>
                                                         </div>
                                                         <div className="flex gap-1 flex-wrap">
@@ -1908,7 +1926,7 @@ Example:
                                                             </label>
                                                             <label className="p-1 bg-zinc-800 hover:bg-emerald-600 rounded cursor-pointer transition-colors">
                                                                 <Plus className="w-3 h-3 text-zinc-400 hover:text-white"/>
-                                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleRefCoverageUpload(e, char.id, 'fullBody')} />
+                                                                <input type="file" className="hidden" accept="image/*" multiple onChange={(e) => handleRefCoverageUpload(e, char.id, 'fullBody')} />
                                                             </label>
                                                         </div>
                                                         <div className="flex gap-1 flex-wrap">
@@ -1937,7 +1955,7 @@ Example:
                                                             </label>
                                                             <label className="p-1 bg-zinc-800 hover:bg-emerald-600 rounded cursor-pointer transition-colors">
                                                                 <Plus className="w-3 h-3 text-zinc-400 hover:text-white"/>
-                                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleRefCoverageUpload(e, char.id, 'threeQuarter')} />
+                                                                <input type="file" className="hidden" accept="image/*" multiple onChange={(e) => handleRefCoverageUpload(e, char.id, 'threeQuarter')} />
                                                             </label>
                                                         </div>
                                                         <div className="flex gap-1 flex-wrap">
@@ -1966,7 +1984,7 @@ Example:
                                                             </label>
                                                             <label className="p-1 bg-zinc-800 hover:bg-emerald-600 rounded cursor-pointer transition-colors">
                                                                 <Plus className="w-3 h-3 text-zinc-400 hover:text-white"/>
-                                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleRefCoverageUpload(e, char.id, 'action')} />
+                                                                <input type="file" className="hidden" accept="image/*" multiple onChange={(e) => handleRefCoverageUpload(e, char.id, 'action')} />
                                                             </label>
                                                         </div>
                                                         <div className="flex gap-1 flex-wrap">
@@ -2241,12 +2259,18 @@ Example:
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center"><MapPin className="w-8 h-8 text-zinc-600" /></div>
                             <div className="flex w-full gap-2">
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     list="location-suggestions"
-                                    value={newLocName} 
-                                    onChange={(e) => setNewLocName(e.target.value)} 
-                                    placeholder="Location Name" 
+                                    value={newLocName}
+                                    onChange={(e) => setNewLocName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && newLocName.trim()) {
+                                            addLocation();
+                                            e.preventDefault();
+                                        }
+                                    }}
+                                    placeholder="Location Name"
                                     className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none text-white"
                                 />
                                 <datalist id="location-suggestions">
@@ -2264,18 +2288,26 @@ Example:
                                 <div key={loc.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative ${hasRef ? 'border-blue-500/30 shadow-blue-900/10 shadow-lg' : 'border-white/5'}`}>
                                     <div className="h-40 bg-zinc-950 relative">
                                         {hasRef ? (
-                                            <img src={loc.imageRefs![0]} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt={loc.name} />
+                                            <div className="w-full h-full flex">
+                                                {loc.imageRefs!.slice(0, 3).map((ref, i) => (
+                                                    <img key={i} src={ref} className={`h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity ${loc.imageRefs!.length === 1 ? 'w-full' : loc.imageRefs!.length === 2 ? 'w-1/2' : 'w-1/3'}`} alt={loc.name} />
+                                                ))}
+                                            </div>
                                         ) : (
                                             <div className="w-full h-full flex items-center justify-center text-zinc-700"><Building2 className="w-10 h-10"/></div>
                                         )}
                                         <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 to-transparent" />
                                         <div className="absolute top-3 right-3 flex gap-2">
-                                            {hasRef && <div className="bg-black/60 backdrop-blur-md text-blue-400 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-blue-500/30"><Lock className="w-3 h-3"/> Locked</div>}
+                                            {hasRef && loc.imageRefs!.length > 0 && (
+                                                <div className="bg-black/60 backdrop-blur-md text-zinc-400 px-2 py-1 rounded-lg text-[10px] font-medium">
+                                                    {loc.imageRefs!.length} refs
+                                                </div>
+                                            )}
                                             <button className="bg-black/60 hover:bg-blue-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors" onClick={() => document.getElementById(`upload-loc-${loc.id}`)?.click()}><Upload className="w-3 h-3" /></button>
                                             <button onClick={() => deleteLocation(loc.id)} className="bg-black/60 hover:bg-red-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors"><Trash2 className="w-3 h-3" /></button>
                                         </div>
                                         <h3 className="absolute bottom-3 left-4 font-bold text-lg text-white">{loc.name}</h3>
-                                        <input type="file" id={`upload-loc-${loc.id}`} className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, loc.id, 'location', true)} />
+                                        <input type="file" id={`upload-loc-${loc.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, loc.id, 'location', true)} />
                                     </div>
                                     <div className="p-4 space-y-4">
                                         <div>
@@ -2383,12 +2415,18 @@ Example:
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center"><Package className="w-8 h-8 text-zinc-600" /></div>
                             <div className="flex w-full gap-2">
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     list="product-suggestions"
-                                    value={newProdName} 
-                                    onChange={(e) => setNewProdName(e.target.value)} 
-                                    placeholder="Product Name" 
+                                    value={newProdName}
+                                    onChange={(e) => setNewProdName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && newProdName.trim()) {
+                                            addProduct();
+                                            e.preventDefault();
+                                        }
+                                    }}
+                                    placeholder="Product Name"
                                     className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm focus:border-amber-500 outline-none text-white"
                                 />
                                 <datalist id="product-suggestions">
@@ -2406,18 +2444,26 @@ Example:
                                 <div key={prod.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative ${hasRef ? 'border-amber-500/30 shadow-amber-900/10 shadow-lg' : 'border-white/5'}`}>
                                     <div className="h-40 bg-zinc-950 relative">
                                         {hasRef ? (
-                                            <img src={prod.imageRefs![0]} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt={prod.name} />
+                                            <div className="w-full h-full flex">
+                                                {prod.imageRefs!.slice(0, 3).map((ref, i) => (
+                                                    <img key={i} src={ref} className={`h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity ${prod.imageRefs!.length === 1 ? 'w-full' : prod.imageRefs!.length === 2 ? 'w-1/2' : 'w-1/3'}`} alt={prod.name} />
+                                                ))}
+                                            </div>
                                         ) : (
                                             <div className="w-full h-full flex items-center justify-center text-zinc-700"><Package className="w-10 h-10"/></div>
                                         )}
                                         <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 to-transparent" />
                                         <div className="absolute top-3 right-3 flex gap-2">
-                                            {hasRef && <div className="bg-black/60 backdrop-blur-md text-amber-400 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-amber-500/30"><Lock className="w-3 h-3"/> Locked</div>}
+                                            {hasRef && prod.imageRefs!.length > 0 && (
+                                                <div className="bg-black/60 backdrop-blur-md text-zinc-400 px-2 py-1 rounded-lg text-[10px] font-medium">
+                                                    {prod.imageRefs!.length} refs
+                                                </div>
+                                            )}
                                             <button className="bg-black/60 hover:bg-amber-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors" onClick={() => document.getElementById(`upload-prod-${prod.id}`)?.click()}><Upload className="w-3 h-3" /></button>
                                             <button onClick={() => deleteProduct(prod.id)} className="bg-black/60 hover:bg-red-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors"><Trash2 className="w-3 h-3" /></button>
                                         </div>
                                         <h3 className="absolute bottom-3 left-4 font-bold text-lg text-white">{prod.name}</h3>
-                                        <input type="file" id={`upload-prod-${prod.id}`} className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, prod.id, 'product', true)} />
+                                        <input type="file" id={`upload-prod-${prod.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, prod.id, 'product', true)} />
                                     </div>
                                     <div className="p-4 space-y-4">
                                         <div>

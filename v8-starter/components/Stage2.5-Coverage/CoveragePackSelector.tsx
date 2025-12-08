@@ -17,16 +17,20 @@ export const CoveragePackSelector: React.FC<CoveragePackSelectorProps> = ({
 }) => {
 
   // Filter packs based on entity type
-  const availablePacks = Object.values(COVERAGE_PACKS).filter(pack => {
-    if (entityType === 'character') {
-      return ['turnaround', 'contactSheet', 'dialogue', 'action'].includes(pack.id);
-    } else if (entityType === 'product') {
-      return ['turnaround', 'contactSheet', 'productHero'].includes(pack.id);
-    } else if (entityType === 'location') {
-      return ['contactSheet', 'location'].includes(pack.id);
-    }
-    return true;
-  });
+  // Use the object keys (turnaround, contactSheet, etc.) not the pack.id values (contact-sheet, etc.)
+  const availablePacks = Object.entries(COVERAGE_PACKS)
+    .filter(([key, pack]) => {
+      if (entityType === 'character') {
+        return ['turnaround', 'contactSheet', 'dialogue', 'action'].includes(key);
+      } else if (entityType === 'product') {
+        return ['turnaround', 'productHero'].includes(key);
+      } else if (entityType === 'location') {
+        // Location only gets location-appropriate packs - NO contactSheet (has character shots like OTS)
+        return ['location'].includes(key);
+      }
+      return true;
+    })
+    .map(([key, pack]) => pack);
 
   return (
     <div className="coverage-pack-selector">
