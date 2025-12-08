@@ -3066,7 +3066,7 @@ export const analyzeScriptWithDirector = async (
   const existingProductNames = existingBibles?.products.map(p => p.name) || [];
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-05-20",
+    model: "gemini-3-pro-preview",
     contents: [
       {
         role: "user",
@@ -3323,7 +3323,7 @@ PRODUCTION DESIGN CONTEXT:
 ` : '';
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-05-20",
+    model: "gemini-3-pro-preview",
     contents: [
       {
         role: "user",
@@ -3437,7 +3437,7 @@ export const interpretVagueDirection = async (
   const ai = await getClient();
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-05-20",
+    model: "gemini-3-pro-preview",
     contents: [
       {
         role: "user",
