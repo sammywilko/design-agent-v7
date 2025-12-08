@@ -9,7 +9,7 @@ import {
     Palette, CheckCircle, AlertCircle, Image as ImageIcon, Trash2
 } from 'lucide-react';
 import { CharacterProfile, ProjectDefaultStyle, StyleDNA } from '../types';
-import { generateStylizedCharacterFromPhoto, extractStyleDNAFromImage } from '../services/gemini';
+import { generateStylizedCharacterFromPhotoFast, extractStyleDNAFromImage } from '../services/gemini';
 
 interface PhotoToCharacterModalProps {
     isOpen: boolean;
@@ -130,7 +130,8 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
         setCurrentStep('generate');
 
         try {
-            const result = await generateStylizedCharacterFromPhoto(
+            // Use FAST single-call version (~15-20s vs ~60-80s)
+            const result = await generateStylizedCharacterFromPhotoFast(
                 personPhoto,
                 styleToUse.styleDNA,
                 styleToUse.referenceImage,
@@ -446,11 +447,11 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
                                     </div>
                                     <h3 className="text-xl font-semibold text-white mb-2">Creating {characterName}...</h3>
                                     <p className="text-sm text-zinc-400 max-w-md mx-auto">
-                                        Extracting features from photo and applying your style. This may take 30-60 seconds.
+                                        Transforming photo into stylized character. Usually takes 15-25 seconds.
                                     </p>
                                     <div className="mt-6 flex items-center justify-center gap-2 text-xs text-zinc-500">
                                         <Loader2 className="w-4 h-4 animate-spin" />
-                                        <span>Analyzing • Stylizing • Rendering</span>
+                                        <span>Stylizing • Rendering</span>
                                     </div>
                                 </div>
                             ) : generatedCharacter ? (

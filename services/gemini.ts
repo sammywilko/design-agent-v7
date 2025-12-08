@@ -2615,13 +2615,15 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Extract character specifications from uploaded image with retry logic
+ * Uses Flash model for speed (3-4x faster than Pro)
  */
 export const extractCharacterSpecs = async (
   imageData: string,
   maxRetries: number = 3
 ): Promise<CharacterSpecs | null> => {
   const ai = await getClient();
-  const model = 'gemini-3-pro-preview';
+  // Use Flash for speed - spec extraction doesn't need Pro quality
+  const model = 'gemini-2.0-flash';
 
   const cleanData = cleanDataUrl(imageData);
   const mimeType = getMimeType(imageData);
@@ -3002,6 +3004,117 @@ ${styleDNA.compositionPatterns?.length > 0 ? `- Composition: ${styleDNA.composit
 - Do NOT create a generic character - this must look like THE SPECIFIC PERSON
 - Apply the EXACT style from Reference 2 (rendering technique, lighting, colors)
 - Maintain facial feature proportions for identity recognition`;
+};
+
+/**
+ * FAST Photo-to-Character - Single API call version
+ * Skips separate spec extraction and does everything in ONE generation call
+ * Expected time: ~15-20 seconds (vs 50-80 seconds for multi-call version)
+ */
+export const generateStylizedCharacterFromPhotoFast = async (
+  realPhoto: string,
+  styleDNA: StyleDNA,
+  styleReferenceImage: string,
+  characterName: string,
+  config: GenerationConfig = { aspectRatio: '1:1', resolution: '2K' }
+): Promise<PhotoToCharacterResult> => {
+  console.log('⚡ FAST Photo-to-Character for:', characterName);
+  const startTime = Date.now();
+
+  const ai = await getClient();
+  const model = 'gemini-3-pro-image-preview';
+
+  const cleanPhotoData = cleanDataUrl(realPhoto);
+  const photoMimeType = getMimeType(realPhoto);
+  const cleanStyleData = cleanDataUrl(styleReferenceImage);
+  const styleMimeType = getMimeType(styleReferenceImage);
+
+  // Single prompt that combines analysis + generation
+  const fastPrompt = `PHOTO-TO-STYLIZED CHARACTER - SINGLE PASS
+
+CHARACTER NAME: ${characterName}
+
+=== YOUR TASK ===
+Analyze the person in REFERENCE IMAGE 1 and transform them into a stylized character matching REFERENCE IMAGE 2's style.
+
+=== STYLE TO APPLY ===
+${styleDNA.promptSnippet}
+- Style: ${styleDNA.photographicStyle || 'Stylized 3D animation'}
+- Lighting: ${styleDNA.lightingCharacteristics || 'Studio lighting'}
+- Mood: ${styleDNA.moodKeywords?.join(', ') || 'Professional'}
+
+=== REQUIREMENTS ===
+1. PRESERVE the person's identity: face shape, features, hair, skin tone
+2. APPLY the exact visual style from Reference 2
+3. Full body portrait, facing camera
+4. Clean background (neutral or simple gradient)
+5. Professional character design quality
+6. Include appropriate footwear
+
+=== CRITICAL ===
+- The person must be INSTANTLY RECOGNIZABLE but stylized
+- This is NOT a filter - RE-CREATE them in the target style
+- Maintain facial proportions for identity recognition
+
+[REFERENCE 1 - THE PERSON TO TRANSFORM]
+[REFERENCE 2 - THE TARGET STYLE]`;
+
+  const parts: Part[] = [
+    { text: fastPrompt },
+    { inlineData: { data: cleanPhotoData, mimeType: photoMimeType } },
+    { inlineData: { data: cleanStyleData, mimeType: styleMimeType } }
+  ];
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ role: 'user', parts }],
+    config: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      imageConfig: {
+        imageSize: config.resolution,
+        aspectRatio: config.aspectRatio
+      }
+    }
+  });
+
+  let stylizedImage = '';
+  if (response.candidates && response.candidates[0]?.content?.parts) {
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData?.data) {
+        const mimeType = part.inlineData.mimeType || 'image/png';
+        stylizedImage = `data:${mimeType};base64,${part.inlineData.data}`;
+        break;
+      }
+    }
+  }
+
+  if (!stylizedImage) {
+    throw new Error('No image was generated');
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`✅ FAST generation complete in ${elapsed}s`);
+
+  // Create minimal character profile (no extracted specs in fast mode)
+  const characterProfile: CharacterProfile = {
+    id: crypto.randomUUID(),
+    name: characterName,
+    description: `Stylized character based on photo. ${styleDNA.promptSnippet}`,
+    imageRefs: [stylizedImage],
+    promptSnippet: `${characterName} character in ${styleDNA.photographicStyle || 'stylized'} style`,
+    consistencyAnchors: '',
+    sourcePhoto: realPhoto,
+    generatedFromPhoto: true,
+    refCoverage: {
+      face: [stylizedImage]
+    }
+  };
+
+  return {
+    stylizedImage,
+    extractedSpecs: null as unknown as CharacterSpecs, // Not extracted in fast mode
+    characterProfile
+  };
 };
 
 /**
