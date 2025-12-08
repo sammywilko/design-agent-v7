@@ -1647,7 +1647,7 @@ export const analyzeImageCoverage = async (
 ): Promise<CoverageAnalysis> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash'; // Vision capable, fast
+    const model = 'gemini-3-pro-preview'; // Vision capable, fast
 
     // Build multimodal prompt with all existing reference images
     const parts: Part[] = [];
@@ -1740,7 +1740,7 @@ export const generateMissingReference = async (
 
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro for image gen
+    const model = 'gemini-3-pro-preview'; // Nano Banana Pro for image gen
 
     // Build multimodal prompt with existing references
     const parts: Part[] = [];
@@ -1814,7 +1814,7 @@ export const generateCharacterAvatar = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro
+    const model = 'gemini-3-pro-preview'; // Nano Banana Pro
 
     const prompt = `CHARACTER DESIGN PORTRAIT
 
@@ -1876,7 +1876,7 @@ export const analyzeCharacterFromImage = async (
 ): Promise<CharacterAnalysisResult> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash'; // Vision capable, fast
+    const model = 'gemini-3-pro-preview'; // Vision capable, fast
 
     // Clean base64 data
     const cleanData = imageBase64.includes(',')
@@ -2116,7 +2116,7 @@ export interface SceneBeat {
 export const generateBeatSheet = async (idea: string): Promise<SceneBeat[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-pro-preview';
 
     const prompt = `Create a 5-beat sequence for a film scene based on this idea: "${idea}".
 For each beat, provide the action and a list of 2-3 recommended camera shots (e.g., "Wide Master", "Close Up", "Over The Shoulder").
@@ -2176,7 +2176,7 @@ export const generateLocationWithAtmosphere = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash-preview-05-20'; // Nano Banana Pro
+    const model = 'gemini-3-pro-preview'; // Nano Banana Pro
 
     let prompt = `Cinematic environment concept art. ${description}.`;
     prompt += ` Time of day: ${timeOfDay}. Weather: ${weather}.`;
@@ -2224,7 +2224,7 @@ export const generateLocationWithAtmosphere = async (
 export const generateTexturePack = async (locationDescription: string): Promise<string[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash-preview-05-20';
+    const model = 'gemini-3-pro-preview';
 
     const prompts = [
       `Close up texture detail of surface for: ${locationDescription}. Material study, photorealistic 8k macro shot.`,
@@ -2419,7 +2419,7 @@ export const analyzeProductionMetadata = async (imageData: string): Promise<Prod
 
     const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-pro-preview',
         contents: {
           parts: [
             {
@@ -2539,7 +2539,7 @@ export interface LocationSpecs {
 export const extractProductSpecs = async (imageData: string): Promise<ProductSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-pro-preview';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -2614,7 +2614,7 @@ Focus on visual details that ensure consistent regeneration.`
 export const extractCharacterSpecs = async (imageData: string): Promise<CharacterSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-pro-preview';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -2692,7 +2692,7 @@ Focus on details that ensure identity consistency across multiple generations.`
 export const extractLocationSpecs = async (imageData: string): Promise<LocationSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-pro-preview';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -2973,7 +2973,7 @@ export const extractStyleDNAFromImage = async (imageData: string): Promise<Style
   console.log('🎨 Extracting Style DNA from reference image...');
 
   const ai = await getClient();
-  const model = 'gemini-2.5-flash';
+  const model = 'gemini-3-pro-preview';
 
   const cleanData = cleanDataUrl(imageData);
   const mimeType = getMimeType(imageData);
