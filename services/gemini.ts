@@ -3049,6 +3049,7 @@ import { ScriptAnalysis, ExtractedEntity, AnalyzedBeat, ClarificationQuestion, C
 /**
  * Analyze a messy script and extract structured data
  * This is the CHAOS PARSER layer of the Script Director
+ * Enhanced with cinematographic research knowledge
  */
 export const analyzeScriptWithDirector = async (
   rawScript: string,
@@ -3072,25 +3073,61 @@ export const analyzeScriptWithDirector = async (
         role: "user",
         parts: [
           {
-            text: `You are a professional Script Director and DP (Director of Photography). Your job is to analyze messy, unstructured scripts and extract:
+            text: `You are a professional Script Director and DP (Director of Photography) with deep knowledge of cinematographic psychology and visual storytelling. Your job is to analyze messy, unstructured scripts and extract structured, actionable production plans.
 
+=== CINEMATOGRAPHY RESEARCH: CAMERA ANGLE PSYCHOLOGY ===
+Camera angles bypass conscious thought and trigger immediate emotional responses:
+• LOW ANGLE (Looking Up): Power, dominance, heroism - mimics child looking at adult
+• HIGH ANGLE (Looking Down): Vulnerability, weakness, being observed - puts viewer in position of judgment
+• EYE LEVEL: Equality, relatability, neutrality - natural human interaction, most "honest" angle
+• DUTCH ANGLE: Unease, disorientation, something wrong - use sparingly (1-2 per scene max)
+• OVERHEAD: Omniscience, fate, patterns, disconnection - impossible natural perspective
+
+=== CINEMATOGRAPHY RESEARCH: SHOT TYPE EMOTIONAL IMPACT ===
+Shot size controls psychological distance:
+• EXTREME WIDE (EWS): Scale, loneliness, epic scope - subject <10% of frame
+• WIDE (WS): Context, physical action, spatial relationships - full body + environment
+• MEDIUM WIDE (MWS): Casual observation, Western standoff energy - head to mid-thigh
+• MEDIUM (MS): Conversational, engaged but not intimate - most versatile, default choice
+• MEDIUM CLOSE-UP (MCU): Attention, importance, beginning of intimacy - head and shoulders
+• CLOSE-UP (CU): Intimacy, intensity, emotional peak, truth - face fills frame, use sparingly
+• EXTREME CLOSE-UP (ECU): Hyper-focus, detail, psychological intensity - single feature only
+
+=== CINEMATOGRAPHY RESEARCH: LIGHTING PSYCHOLOGY ===
+• HIGH KEY: Safety, optimism, clarity - comedy, corporate, product beauty
+• LOW KEY: Mystery, danger, drama, sophistication - thriller, luxury, villain scenes
+• SOFT LIGHT: Gentleness, beauty, romance - flattering, timeless feel
+• HARD LIGHT: Intensity, truth, harshness - confrontation, documentary, gritty reality
+• WARM (2700-3500K): Comfort, intimacy, nostalgia - home, romance, memory
+• COOL (5500-7500K): Technology, cold, isolation, sadness - sci-fi, clinical, loneliness
+
+=== CINEMATOGRAPHY RESEARCH: BEAT STRUCTURE ===
+• SETUP BEAT: Establish info needed later - wide shots, keep tight (3-5 sec)
+• DEVELOPMENT BEAT: Progress plot/character - medium shots, gradual push-ins (8-15 sec)
+• TURNING POINT: Major direction change - quick cut to tight shot for revelation
+• CLIMAX BEAT: Peak tension/emotion - tightest shots, most dynamic movement (10-20 sec)
+• RESOLUTION BEAT: Return to stability - pull back to wider shots (3-8 sec)
+
+=== YOUR TASK ===
 1. ENTITIES (deduplicated):
-   - Characters: Find ALL character names, even scattered/inconsistent mentions. Consolidate duplicates ("Nicola b" and "Nicola B" = same person).
-   - Locations: Identify all settings, both literal (London pub) and metaphorical (mountain ridge).
-   - Products: Find key props and products mentioned.
+   - Characters: Find ALL character names, consolidate duplicates ("Nicola b" = "Nicola B")
+   - Locations: All settings, literal (London pub) and metaphorical (mountain ridge)
+   - Products: Key props and products mentioned
 
 2. NARRATIVES:
-   - Detect if there are parallel narratives (e.g., literal UK journey + metaphorical trek).
-   - Identify if content is metaphorical vs literal.
+   - Detect parallel narratives (literal journey + metaphorical trek)
+   - Identify metaphorical vs literal content
 
 3. BEAT BREAKDOWN WITH SHOTS:
-   - Break the script into logical beats/scenes.
-   - For EACH beat, break it down into 3-8 SPECIFIC SHOTS with technical camera specifications.
-   - Convert vague directions ("Forrest Gump feather type thing") into specific shot sequences.
+   - Break script into logical beats/scenes
+   - For EACH beat, create 3-8 SPECIFIC SHOTS with:
+     * Shot size based on emotional intensity (wider = context, tighter = emotion)
+     * Camera angle based on power dynamics and emotional intent
+     * Lighting that supports the mood
+     * Duration based on beat type
+   - Convert vague directions ("Forrest Gump feather type thing") into specific shot sequences
 
-4. CLARIFICATION QUESTIONS:
-   - Only ask about truly ambiguous items (entity disambiguation, sensitive content).
-   - Maximum 5 questions.
+4. CLARIFICATION QUESTIONS (max 5, truly ambiguous items only)
 
 EXISTING ENTITIES (match against these, don't duplicate):
 Characters: ${existingCharacterNames.join(', ') || 'None yet'}
@@ -3102,7 +3139,7 @@ SCRIPT TO ANALYZE:
 ${rawScript}
 ---
 
-Respond with structured JSON matching the schema.`
+Respond with structured JSON matching the schema. Apply cinematography psychology to every shot decision.`
           }
         ]
       }
@@ -3301,6 +3338,7 @@ Respond with structured JSON matching the schema.`
 
 /**
  * Generate shot breakdown for a single beat
+ * Enhanced with cinematographic research knowledge
  */
 export const generateShotBreakdown = async (
   beatDescription: string,
@@ -3329,9 +3367,39 @@ PRODUCTION DESIGN CONTEXT:
         role: "user",
         parts: [
           {
-            text: `You are a professional Director of Photography breaking down a beat into specific, technical shots.
+            text: `You are a professional Director of Photography with deep knowledge of visual psychology. Break down this beat into specific, technically-precise shots.
 
-Convert this beat description into 4-8 specific shots with full technical specifications.
+=== CINEMATOGRAPHY PSYCHOLOGY GUIDE ===
+
+SHOT SIZE → EMOTIONAL IMPACT:
+• EWS (Extreme Wide): Scale, loneliness, epic - subject <10% of frame, hold 4-6 sec
+• WS (Wide): Context, action, spatial - full body + environment, hold 3-5 sec
+• MWS (Medium Wide): Casual observation, standoff - head to thigh, hold 3-4 sec
+• MS (Medium): Conversational, balanced - head to waist, hold 2-4 sec (DEFAULT)
+• MCU (Medium Close-Up): Attention, importance - head/shoulders, hold 2-3 sec
+• CU (Close-Up): Intimacy, emotion, truth - face fills frame, hold 1-3 sec (USE SPARINGLY)
+• ECU (Extreme Close-Up): Hyper-focus, intensity - single feature, hold 0.5-2 sec
+
+CAMERA ANGLE → PSYCHOLOGICAL EFFECT:
+• LOW ANGLE: Power, heroism, dominance - character looks larger/stronger
+• HIGH ANGLE: Vulnerability, weakness, judgment - character looks smaller/weaker
+• EYE LEVEL: Equality, relatability, neutrality - default for conversation
+• DUTCH TILT: Unease, instability, something wrong - USE VERY SPARINGLY (1-2 per scene)
+• OVERHEAD: Omniscience, pattern, fate - god's-eye detachment
+
+LIGHTING → MOOD:
+• HIGH KEY: Bright, safe, optimistic - comedy, corporate, beauty
+• LOW KEY: Shadows, mystery, danger - drama, thriller, sophistication
+• SOFT: Gentle, romantic, beautiful - flattering, diffused
+• HARD: Intense, harsh, truthful - confrontation, documentary
+• WARM (orange/yellow): Comfort, intimacy, nostalgia
+• COOL (blue): Technology, clinical, isolation, sadness
+
+BEAT STRUCTURE FLOW:
+1. ESTABLISH (wide) → 2. DEVELOP (medium) → 3. ESCALATE (tighten) → 4. PEAK (close) → 5. RESOLVE (widen)
+As emotional intensity increases, shots should get TIGHTER.
+
+=== YOUR TASK ===
 
 BEAT DESCRIPTION:
 ${beatDescription}
@@ -3342,16 +3410,23 @@ AVAILABLE ENTITIES:
 - Products: ${entityContext.products.join(', ') || 'None specified'}
 ${styleContext}
 
-For each shot, specify:
-1. Shot size (ECU, CU, MCU, MS, MWS, WS, EWS)
-2. Camera angle (eye-level, high-angle, low-angle, overhead, dutch, birds-eye, worms-eye)
+Create 4-8 specific shots that:
+1. Progress logically through the beat (establish → develop → peak → resolve)
+2. Use shot size to control emotional distance
+3. Use camera angle to convey power dynamics
+4. Use lighting to support mood
+5. Include proper hold durations based on shot type
+
+For each shot specify:
+1. Shot size (ECU, CU, MCU, MS, MWS, WS, EWS) - with psychological reasoning
+2. Camera angle - based on power/emotion intent
 3. Camera movement (static, dolly-in, dolly-out, pan, tracking, crane, orbit, handheld)
 4. Focal length (24mm wide, 35mm standard, 50mm normal, 85mm portrait, 135mm telephoto)
 5. Composition (foreground, midground, background, depth of field, framing)
 6. Lighting (time of day, quality, direction, mood)
-7. Duration (seconds)
+7. Duration (in seconds, based on shot type guidelines)
 8. Which entities appear in the shot
-9. Director notes for the shot
+9. Director notes explaining the visual psychology choice
 
 Respond with a JSON array of shots.`
           }
@@ -3424,6 +3499,7 @@ Respond with a JSON array of shots.`
 /**
  * Interpret vague creative direction into specific shots
  * e.g., "Forrest Gump feather type thing" → specific tracking shot sequence
+ * Enhanced with cinematographic psychology and style reference knowledge
  */
 export const interpretVagueDirection = async (
   vagueInput: string,
@@ -3443,7 +3519,42 @@ export const interpretVagueDirection = async (
         role: "user",
         parts: [
           {
-            text: `You are a professional Director of Photography who specializes in translating vague creative directions into specific, technical shot sequences.
+            text: `You are a professional Director of Photography with encyclopedic knowledge of cinema history and visual psychology. Your specialty is translating vague creative directions into specific, technically-precise shot sequences.
+
+=== STYLE REFERENCE KNOWLEDGE ===
+
+CINEMATIC LOOKS:
+• "Film grain, 35mm" → Organic, classic cinema feel
+• "Anamorphic lens flares" → Sci-fi, epic, premium
+• "Shallow depth of field" → Intimate, professional
+• "High contrast, desaturated" → Gritty, dramatic
+• "Soft, diffused lighting" → Romantic, beauty
+
+PERIOD/GENRE LOOKS:
+• "1970s film stock" → Warm, grainy, nostalgic
+• "Noir lighting" → High contrast, shadows, mystery
+• "Wes Anderson symmetry" → Centered, pastel, precise
+• "Blade Runner aesthetic" → Neon, rain, cyberpunk
+• "Spielbergian warmth" → Golden hour, lens flares, wonder
+
+COMMON VAGUE DIRECTION TRANSLATIONS:
+• "Forrest Gump feather" → Magical realism, tracking shots, floating object, wonder
+• "Tarantino dialogue" → Low angles, static wides, tension through stillness
+• "Music video energy" → Fast cuts, dutch angles, dynamic movement
+• "Documentary feel" → Handheld, available light, imperfect framing
+• "Dreamy/ethereal" → Soft focus, backlighting, slow motion, desaturated
+
+=== SHOT PSYCHOLOGY GUIDE ===
+
+As you build the shot sequence, apply these principles:
+• Wider shots = establishing context, emotional distance
+• Tighter shots = intimacy, emotional intensity
+• Low angles = power, heroism
+• High angles = vulnerability, weakness
+• Slow movement = contemplation, significance
+• Fast movement = energy, urgency, chaos
+
+=== YOUR TASK ===
 
 The director has given this vague direction:
 "${vagueInput}"
@@ -3454,15 +3565,25 @@ Context:
 - Style: ${context?.style?.visualStyle || 'Not specified'}
 
 Your job:
-1. Interpret what the director actually wants (what film reference? what visual effect? what emotional beat?)
-2. Create a specific shot sequence (3-6 shots) that achieves this creative vision
-3. Provide technical notes on how to achieve the look
-4. Suggest a reference style for generation
+1. INTERPRET what the director actually wants:
+   - What film/visual reference are they evoking?
+   - What emotional effect do they want?
+   - What specific visual language achieves this?
 
-Example interpretations:
-- "Forrest Gump feather type thing" → Magical realism tracking shot sequence with floating object, 4 shots (wide establishing, medium tracking, close detail, wide ascending)
-- "Charming, romantic vision" → Soft-focus, warm lighting, intimate framing, shallow DOF
-- "Gritty documentary feel" → Handheld, natural light, tight framing, desaturated
+2. CREATE a specific shot sequence (3-6 shots) that achieves this creative vision:
+   - Start wide to establish, then progressively tighten or vary for interest
+   - Use camera angle to support the emotional intent
+   - Include specific technical details (lens, movement, lighting)
+
+3. PROVIDE technical notes on how to achieve the look:
+   - Lighting setup
+   - Color temperature
+   - Lens choice
+   - Camera movement style
+
+4. SUGGEST a reference style for AI generation:
+   - Use established style descriptors that AI understands
+   - Include film grain, color treatment, lighting mood
 
 Respond with JSON matching the schema.`
           }
