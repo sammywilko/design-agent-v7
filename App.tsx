@@ -14,6 +14,7 @@ import ProducerChat from './components/ProducerChat';
 import CollaborationPanel from './components/CollaborationPanel';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import DownloadModal from './components/DownloadModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -1595,89 +1596,99 @@ ${clips}
         {/* Main Content Area */}
         <div className="flex-1 relative">
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_0_SCRIPT ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <ScriptStudio
-                currentProject={currentProject}
-                onUpdateScriptData={setScriptData}
-                savedData={scriptData}
-                showNotification={showNotification}
-                onGenerateBeat={handleGenerateBeat}
-                onGenerateSequence={handleGenerateSequence}
-                onGenerateCharacterSheet={handleGenerateCharacterSheet}
-                onGenerateExpressionBank={handleGenerateExpressionBank}
-                onSyncStoryboard={handleSyncToStoryboard}
-                incomingCharacter={incomingCharacter}
-                moodBoards={moodBoards}
-                onSaveVariantToHistory={(variant) => addToGlobalHistory(variant)}
-                onGenerateCoverageImage={handleGenerateCoverageImage}
-            />
+            <ErrorBoundary componentName="Script Studio" onError={(e) => console.error('Script Studio error:', e)}>
+              <ScriptStudio
+                  currentProject={currentProject}
+                  onUpdateScriptData={setScriptData}
+                  savedData={scriptData}
+                  showNotification={showNotification}
+                  onGenerateBeat={handleGenerateBeat}
+                  onGenerateSequence={handleGenerateSequence}
+                  onGenerateCharacterSheet={handleGenerateCharacterSheet}
+                  onGenerateExpressionBank={handleGenerateExpressionBank}
+                  onSyncStoryboard={handleSyncToStoryboard}
+                  incomingCharacter={incomingCharacter}
+                  moodBoards={moodBoards}
+                  onSaveVariantToHistory={(variant) => addToGlobalHistory(variant)}
+                  onGenerateCoverageImage={handleGenerateCoverageImage}
+              />
+            </ErrorBoundary>
         </div>
 
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_1_CONCEPT ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <StageOne
-                onImageSelect={handleImageSelect}
-                showNotification={showNotification}
-                onImageGenerated={(img) => addToGlobalHistory(img)}
-                currentProject={currentProject}
-                onLibraryUpdate={refreshLibrary}
-                incomingPrompt={incomingBeatPrompt}
-                onClearIncomingPrompt={() => setIncomingBeatPrompt(null)}
-                onSendToScript={handleSendToScript}
-                onSendToStoryboard={handleSendToStoryboard}
-                bibleCharacters={scriptData?.characters || []}
-                bibleLocations={scriptData?.locations || []}
-                bibleProducts={scriptData?.products || []}
-                productionDesign={scriptData?.productionDesign}
-            />
+            <ErrorBoundary componentName="Concept Generator" onError={(e) => console.error('Concept Generator error:', e)}>
+              <StageOne
+                  onImageSelect={handleImageSelect}
+                  showNotification={showNotification}
+                  onImageGenerated={(img) => addToGlobalHistory(img)}
+                  currentProject={currentProject}
+                  onLibraryUpdate={refreshLibrary}
+                  incomingPrompt={incomingBeatPrompt}
+                  onClearIncomingPrompt={() => setIncomingBeatPrompt(null)}
+                  onSendToScript={handleSendToScript}
+                  onSendToStoryboard={handleSendToStoryboard}
+                  bibleCharacters={scriptData?.characters || []}
+                  bibleLocations={scriptData?.locations || []}
+                  bibleProducts={scriptData?.products || []}
+                  productionDesign={scriptData?.productionDesign}
+              />
+            </ErrorBoundary>
         </div>
         
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_2_EDITING ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <StageTwo
-                initialImage={workingImage}
-                onBack={() => {
-                    setStage(AppStage.STAGE_1_CONCEPT);
-                    markEditsDone();
-                }}
-                showNotification={showNotification}
-                onImageEdited={(img) => {
-                    addToGlobalHistory(img);
-                    markEditsUnsaved();
-                }}
-                onAddToGallery={(img) => addToGlobalHistory(img)}
-                currentProject={currentProject}
-                onLibraryUpdate={refreshLibrary}
-                productionDesign={scriptData?.productionDesign}
-                bibleCharacters={scriptData?.characters || []}
-                bibleLocations={scriptData?.locations || []}
-                bibleProducts={scriptData?.products || []}
-                editQueue={editQueue}
-                onProcessQueue={processNextInQueue}
-            />
+            <ErrorBoundary componentName="Image Editor" onError={(e) => console.error('Image Editor error:', e)}>
+              <StageTwo
+                  initialImage={workingImage}
+                  onBack={() => {
+                      setStage(AppStage.STAGE_1_CONCEPT);
+                      markEditsDone();
+                  }}
+                  showNotification={showNotification}
+                  onImageEdited={(img) => {
+                      addToGlobalHistory(img);
+                      markEditsUnsaved();
+                  }}
+                  onAddToGallery={(img) => addToGlobalHistory(img)}
+                  currentProject={currentProject}
+                  onLibraryUpdate={refreshLibrary}
+                  productionDesign={scriptData?.productionDesign}
+                  bibleCharacters={scriptData?.characters || []}
+                  bibleLocations={scriptData?.locations || []}
+                  bibleProducts={scriptData?.products || []}
+                  editQueue={editQueue}
+                  onProcessQueue={processNextInQueue}
+              />
+            </ErrorBoundary>
         </div>
 
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_3_STORYBOARD ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <StageThree 
-                globalAssets={globalHistory}
-                libraryAssets={libraryAssets}
-                showNotification={showNotification}
-                onImportAsset={(img) => addToGlobalHistory(img)}
-                onRemoveAsset={removeFromGlobalHistory}
-                currentProject={currentProject}
-                onSendToVideo={handleSendToVideo}
-                incomingBeats={incomingGhostBeats}
-                onClearIncomingBeats={() => setIncomingGhostBeats(null)}
-            />
+            <ErrorBoundary componentName="Storyboard" onError={(e) => console.error('Storyboard error:', e)}>
+              <StageThree
+                  globalAssets={globalHistory}
+                  libraryAssets={libraryAssets}
+                  showNotification={showNotification}
+                  onImportAsset={(img) => addToGlobalHistory(img)}
+                  onRemoveAsset={removeFromGlobalHistory}
+                  currentProject={currentProject}
+                  onSendToVideo={handleSendToVideo}
+                  incomingBeats={incomingGhostBeats}
+                  onClearIncomingBeats={() => setIncomingGhostBeats(null)}
+              />
+            </ErrorBoundary>
         </div>
 
         <div className={`absolute inset-0 flex flex-col transition-opacity duration-300 ${stage === AppStage.STAGE_4_VIDEO ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <StageFour
-                currentProject={currentProject}
-                showNotification={showNotification}
-                initialStartFrame={videoStartFrame}
-                initialEndFrame={videoEndFrame}
-                initialPrompt={videoPrompt}
-                projectImages={globalHistory}
-                libraryAssets={libraryAssets}
-            />
+            <ErrorBoundary componentName="Video Generator" onError={(e) => console.error('Video Generator error:', e)}>
+              <StageFour
+                  currentProject={currentProject}
+                  showNotification={showNotification}
+                  initialStartFrame={videoStartFrame}
+                  initialEndFrame={videoEndFrame}
+                  initialPrompt={videoPrompt}
+                  projectImages={globalHistory}
+                  libraryAssets={libraryAssets}
+              />
+            </ErrorBoundary>
         </div>
         </div>{/* End Main Content Area */}
 
