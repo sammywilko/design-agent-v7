@@ -318,6 +318,8 @@ export interface CharacterProfile {
     styleApplied?: string;            // ID of ProjectDefaultStyle used
     generatedFromPhoto?: boolean;     // Flag for photo-derived characters
     photoRealMode?: boolean;          // True if generated in photo-real mode (documentary/recon)
+    // Reference Intelligence - Visual Vocabulary
+    referenceVocabulary?: ReferenceVocabulary;
 }
 
 // NEW: Location Profile for World Bible
@@ -337,6 +339,8 @@ export interface LocationProfile {
     textures?: string[];       // Generated texture pack images
     // AI-Extracted Specifications (Intelligence Layer)
     extractedSpecs?: LocationSpecs;
+    // Reference Intelligence - Visual Vocabulary
+    referenceVocabulary?: ReferenceVocabulary;
 }
 
 // NEW: Product Profile for World Bible
@@ -353,6 +357,8 @@ export interface ProductProfile {
     heroAngles?: string[];     // Preferred camera angles for this product
     // AI-Extracted Specifications (Intelligence Layer)
     extractedSpecs?: ProductSpecs;
+    // Reference Intelligence - Visual Vocabulary
+    referenceVocabulary?: ReferenceVocabulary;
 }
 
 export type FocalLength = '16mm' | '24mm' | '35mm' | '50mm' | '85mm' | '135mm' | '200mm';
@@ -616,4 +622,139 @@ export interface CreativeInterpretation {
     referenceStyle: string;             // Style description for generation
     mood: string;
     estimatedDuration: number;
+}
+
+// ============================================
+// REFERENCE INTELLIGENCE SYSTEM
+// ============================================
+
+/**
+ * Visual vocabulary extracted from reference images for consistency enforcement
+ */
+export interface ReferenceVocabulary {
+    id: string;
+    sourceImages: string[];             // Base64 source images
+    createdAt: number;
+    focusArea: 'character' | 'location' | 'product' | 'style';
+
+    // Pose vocabulary (primarily for characters)
+    poseVocabulary: Array<{
+        id: string;
+        bodyAngle: string;              // 'three-quarter-left', 'frontal', 'profile-right'
+        headTilt: string;               // 'slight-left-tilt', 'neutral', 'chin-up'
+        shoulderLine: string;           // 'relaxed', 'squared', 'asymmetric'
+        gesture: string;                // 'hands-in-pockets', 'arms-crossed', 'hands-visible'
+        eyeDirection: string;           // 'camera-direct', 'slight-left', 'downcast'
+        weight: number;                 // 0-1, prominence of this pose in refs
+    }>;
+
+    // Lighting DNA
+    lightingDNA: {
+        keyLight: {
+            direction: string;          // 'upper-left-45', 'frontal', 'rim-only'
+            quality: string;            // 'soft', 'hard', 'mixed'
+            intensity: string;          // 'low-key', 'high-key', 'natural'
+        };
+        fillRatio: string;              // '1:2', '1:4', 'no-fill'
+        rimLight: boolean;
+        practicalSources: string[];     // ['window-left', 'neon-signs']
+        colorTemp: string;              // 'warm-3200k', 'daylight-5600k', 'cool-6500k'
+        confidence: number;             // 0-100
+    };
+
+    // Fabric behavior (for characters/products)
+    fabricBehavior: {
+        material: string;               // 'cotton', 'silk', 'leather', 'denim'
+        weight: string;                 // 'light', 'medium', 'heavy'
+        drape: string;                  // 'structured', 'flowing', 'fitted'
+        wrinklePattern: string[];       // ['elbow-creases', 'hem-bunch']
+        surfaceTexture: string;         // 'matte', 'slight-sheen', 'reflective'
+        colorFastness: string;          // 'vibrant', 'muted', 'washed-out'
+    };
+
+    // Composition rules
+    compositionRules: Array<{
+        type: string;                   // 'rule-of-thirds', 'centered', 'golden-ratio'
+        subjectPlacement: string;       // 'left-third', 'center', 'right-third'
+        headRoom: string;               // 'tight', 'generous', 'none'
+        lookingRoom: boolean;           // Follows look direction
+        depthOfField: string;           // 'shallow-f1.4', 'medium-f4', 'deep-f11'
+    }>;
+
+    // Color science
+    colorScience: {
+        dominantColors: Array<{
+            hex: string;
+            name: string;
+            percentage: number;
+        }>;
+        skinTones: {
+            highlights: string;
+            midtones: string;
+            shadows: string;
+        };
+        colorGrade: string;             // 'teal-orange', 'natural', 'desaturated'
+        saturation: string;             // 'punchy', 'natural', 'muted'
+        contrast: string;               // 'high', 'medium', 'low'
+    };
+
+    // Pre-built constraint string for prompts
+    generationConstraints: string;
+    // Unique visual signature description
+    styleFingerprint: string;
+
+    // Quality metrics
+    confidenceScore: number;            // 0-100, overall extraction confidence
+    version: string;                    // Schema version
+}
+
+/**
+ * Validation result for generated image consistency
+ */
+export interface VocabularyValidation {
+    aspect: string;                     // 'pose', 'lighting', 'color', 'fabric'
+    isConsistent: boolean;
+    confidence: number;                 // 0-100
+    deviation: string;                  // Description of what's different
+    severity: 'critical' | 'moderate' | 'minor';
+    suggestion: string;                 // How to fix
+}
+
+/**
+ * Image with vocabulary validation attached
+ */
+export interface ValidatedImage extends GeneratedImage {
+    validation?: {
+        overall: 'pass' | 'warning' | 'fail';
+        issues: VocabularyValidation[];
+        needsRegeneration: boolean;
+    };
+}
+
+// ============================================
+// SOPHISTICATED EDIT SYSTEM
+// ============================================
+
+/**
+ * Edit instruction with metadata for non-destructive editing
+ */
+export interface EditInstruction {
+    id: string;
+    instruction: string;              // The edit text
+    timestamp: number;
+    masked: boolean;                  // Was this a masked edit?
+    references: string[];             // Reference IDs used
+}
+
+/**
+ * Version history item with edit stack tracking
+ * Enables branching: restore any point and branch from there
+ */
+export interface VersionHistoryItem {
+    image: GeneratedImage;
+    editStack: EditInstruction[];     // Edits applied to get here
+    timestamp: number;
+    label?: string;                   // Optional user label ("Final v2", "Before color fix")
+    isBranch?: boolean;               // Was this a branch point?
+    branchedFrom?: string;            // ID of image this branched from
 }

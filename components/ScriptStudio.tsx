@@ -4,6 +4,7 @@ import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2
 import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard, CharacterSpecs, LocationSpecs, ProductSpecs, ProjectDefaultStyle } from '../types';
 import PhotoToCharacterModal from './PhotoToCharacterModal';
 import ScriptDirectorModal from './ScriptDirectorModal';
+import SceneCoverageModal from './SceneCoverageModal';
 import { analyzeScript, consultDirectorChat, analyzeImageCoverage, generateMissingReference, generateCharacterAvatar, analyzeCharacterFromImage, generateTexturePack, generateLocationWithAtmosphere, generateBeatSheet, SceneBeat, TIME_OF_DAY_OPTIONS, WEATHER_OPTIONS, extractCharacterSpecs, extractLocationSpecs, extractProductSpecs } from '../services/gemini';
 import { db } from '../services/db';
 import ReactMarkdown from 'react-markdown';
@@ -116,6 +117,9 @@ const ScriptStudio: React.FC<ScriptStudioProps> = ({
 
   // Variant Explorer State
   const [exploringBeat, setExploringBeat] = useState<Beat | null>(null);
+
+  // Scene Coverage Modal State (Cinematic 9-Shot)
+  const [coverageBeat, setCoverageBeat] = useState<Beat | null>(null);
 
   // Coverage Pack Generator State
   const [coverageEntity, setCoverageEntity] = useState<{entity: CharacterProfile | LocationProfile | ProductProfile, type: EntityType} | null>(null);
@@ -1803,6 +1807,13 @@ Example:
                                                 <Grid className="w-3.5 h-3.5" /> Sequence
                                             </button>
                                             <button
+                                                onClick={() => setCoverageBeat(beat)}
+                                                className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-lg"
+                                                title="Generate 9-shot cinematographic coverage"
+                                            >
+                                                <Camera className="w-3.5 h-3.5" /> 9-Shot
+                                            </button>
+                                            <button
                                                 onClick={() => {
                                                     if (confirm('Delete this beat?')) {
                                                         setBeats(prev => prev.filter(b => b.id !== beat.id));
@@ -3181,6 +3192,34 @@ Example:
         onImportComplete={handleScriptDirectorImport}
         showNotification={showNotification}
     />
+
+    {/* Scene Coverage Modal (Cinematic 9-Shot) */}
+    {coverageBeat && (
+        <SceneCoverageModal
+            isOpen={true}
+            onClose={() => setCoverageBeat(null)}
+            beat={coverageBeat}
+            references={[]}
+            config={{ aspectRatio: '16:9', resolution: '2K' }}
+            characters={characters}
+            locations={locations}
+            products={products}
+            moodBoards={moodBoards}
+            onImagesGenerated={(images, beatId) => {
+                // Add generated images to the beat's generatedImageIds
+                setBeats(prev => prev.map(b => {
+                    if (b.id !== beatId) return b;
+                    return {
+                        ...b,
+                        generatedImageIds: [...(b.generatedImageIds || []), ...images.map(img => img.id)],
+                        status: 'coverage_complete' as const
+                    };
+                }));
+                showNotification(`Added ${images.length} coverage shots to beat`);
+            }}
+            showNotification={showNotification}
+        />
+    )}
     </>
   );
 };

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward } from 'lucide-react';
-import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile } from '../types';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag } from 'lucide-react';
+import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
 import CoverageModal from './CoverageModal';
@@ -41,17 +41,25 @@ const QUICK_EDITS = [
 
 const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotification, onImageEdited, onAddToGallery, currentProject, onLibraryUpdate, productionDesign, bibleCharacters = [], bibleLocations = [], bibleProducts = [], editQueue = [], onProcessQueue }) => {
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(initialImage);
-  const [history, setHistory] = useState<GeneratedImage[]>(initialImage ? [initialImage] : []);
+  const [history, setHistory] = useState<VersionHistoryItem[]>(initialImage ? [{
+    image: initialImage,
+    editStack: [],
+    timestamp: Date.now(),
+    label: 'Original'
+  }] : []);
   const [instruction, setInstruction] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [references, setReferences] = useState<ReferenceAsset[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  
-  // NON-DESTRUCTIVE EDITING: Track original + edit stack
-  const [originalImage, setOriginalImage] = useState<GeneratedImage | null>(initialImage);
-  const [editStack, setEditStack] = useState<string[]>([]);
+
+  // SOPHISTICATED NON-DESTRUCTIVE EDITING
+  // pristineOriginal: The UNTOUCHED original - NEVER changes after initial upload
+  // currentEditStack: Edit instructions applied to pristineOriginal to get currentImage
+  const [pristineOriginal, setPristineOriginal] = useState<GeneratedImage | null>(initialImage);
+  const [currentEditStack, setCurrentEditStack] = useState<EditInstruction[]>([]);
   const [useNonDestructive, setUseNonDestructive] = useState(true); // Toggle for edit mode
+  const [useChainedEdits, setUseChainedEdits] = useState(true); // NEW: Chain edits on current canvas vs re-apply all to pristine
   const [useLookbook, setUseLookbook] = useState(true); // Toggle for Production Design style injection
   
   // Masking State
@@ -85,11 +93,18 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
   const loadImageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (initialImage && (!currentImage || initialImage.id !== history[0]?.id)) {
+    if (initialImage && (!currentImage || initialImage.id !== history[0]?.image.id)) {
         setCurrentImage(initialImage);
-        setHistory([initialImage]);
+        setPristineOriginal(initialImage);
+        setCurrentEditStack([]);
+        setHistory([{
+          image: initialImage,
+          editStack: [],
+          timestamp: Date.now(),
+          label: 'Original'
+        }]);
         setInstruction('');
-        setReferences([]); 
+        setReferences([]);
         clearMask();
         setCritique('');
     }
@@ -367,7 +382,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
     if (styleContext) {
       textToUse = styleContext + textToUse;
     }
-    
+
     const allReferences = [...references, ...mentionRefs, ...styleRefs].slice(0, MAX_REFERENCES);
 
     setIsEditing(true);
@@ -375,54 +390,101 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
 
     try {
       let newImage: GeneratedImage;
-      
-      // NON-DESTRUCTIVE MODE: Combine all edits and apply to original
+      let newEditStack: EditInstruction[] = [];
+
+      // Create the new edit instruction
+      const newEditInstruction: EditInstruction = {
+        id: crypto.randomUUID(),
+        instruction: textToUse,
+        timestamp: Date.now(),
+        masked: !!maskData,
+        references: allReferences.map(r => r.id)
+      };
+
+      // NON-DESTRUCTIVE MODE with two sub-modes:
+      // 1. CHAINED EDITS (default): Apply new edit to CURRENT canvas state - edits build on each other
+      // 2. RE-APPLY ALL: Combine all edits and apply to PRISTINE original (old behavior)
       // (Skip if using mask - masks are position-specific and require destructive editing)
-      if (useNonDestructive && originalImage && !maskData) {
-        const newStack = [...editStack, textToUse];
-        setEditStack(newStack);
-        
-        // Combine all edits into one comprehensive instruction
-        const combinedInstruction = newStack.length === 1 
-          ? newStack[0]
-          : `Apply ALL of the following edits simultaneously to the image:\n${newStack.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}\n\nIMPORTANT: Apply all edits at once, maintaining consistency across all changes.`;
-        
-        newImage = await applyEdit(
-            originalImage.url,  // Always use original!
-            combinedInstruction, 
-            allReferences, 
-            undefined,  // No mask in non-destructive mode
-            overrideResolution,
-            originalImage.aspectRatio
-        );
-        
-        showNotification(`✓ Applied ${newStack.length} edit(s) to original`);
+      if (useNonDestructive && pristineOriginal && !maskData) {
+        newEditStack = [...currentEditStack, newEditInstruction];
+        setCurrentEditStack(newEditStack);
+
+        if (useChainedEdits) {
+          // CHAINED EDITS MODE: Apply new edit to CURRENT canvas state
+          // This ensures each edit builds on the previous result
+          console.log(`🔗 Chained edit: Applying edit #${newEditStack.length} to CURRENT canvas state`);
+
+          newImage = await applyEdit(
+              currentImage.url,  // ✅ Use CURRENT canvas, not pristine
+              textToUse,
+              allReferences,
+              undefined,
+              overrideResolution,
+              currentImage.aspectRatio
+          );
+
+          showNotification(`✓ Edit #${newEditStack.length} applied to current canvas`);
+        } else {
+          // RE-APPLY ALL MODE: Combine all edits and apply to pristine original
+          // Useful for "final render" or when edits drift too far from intent
+          console.log(`🔄 Re-apply all: Combining ${newEditStack.length} edits on PRISTINE original`);
+
+          const allInstructions = newEditStack.map(e => e.instruction);
+          const combinedInstruction = allInstructions.length === 1
+            ? allInstructions[0]
+            : `Apply ALL of the following edits simultaneously to the image:\n${allInstructions.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}\n\nIMPORTANT: Apply all edits at once, maintaining consistency across all changes.`;
+
+          newImage = await applyEdit(
+              pristineOriginal.url,  // Use PRISTINE original
+              combinedInstruction,
+              allReferences,
+              undefined,
+              overrideResolution,
+              pristineOriginal.aspectRatio
+          );
+
+          showNotification(`✓ Applied ${newEditStack.length} edit(s) to pristine original`);
+        }
       } else {
         // DESTRUCTIVE MODE: Apply to current image (legacy behavior, or when using mask)
         newImage = await applyEdit(
-            currentImage.url, 
-            textToUse, 
-            allReferences, 
-            maskData, 
+            currentImage.url,
+            textToUse,
+            allReferences,
+            maskData,
             overrideResolution,
             currentImage.aspectRatio
         );
-        
-        // If using destructive mode, reset the non-destructive stack
+
+        // If using mask, this becomes a new pristine original (branch point)
         if (maskData) {
-          setOriginalImage(newImage); // New baseline after masked edit
-          setEditStack([]);
-          showNotification("Mask edit applied (new baseline set)");
+          newEditStack = [newEditInstruction]; // Start fresh stack with this edit
+          setCurrentEditStack([]);
+          // Pristine stays the same - mask edits are tracked but don't reset pristine
+          showNotification("Mask edit applied (destructive)");
+        } else {
+          // Destructive non-mask edit
+          newEditStack = [...currentEditStack, newEditInstruction];
+          setCurrentEditStack(newEditStack);
         }
       }
-      
+
       newImage.projectId = currentProject.id;
       setCurrentImage(newImage);
-      setHistory(prev => [...prev, newImage]);
+
+      // Add to version history with full edit stack
+      const newHistoryItem: VersionHistoryItem = {
+        image: newImage,
+        editStack: newEditStack,
+        timestamp: Date.now(),
+        isBranch: !!maskData
+      };
+      setHistory(prev => [...prev, newHistoryItem]);
+
       setInstruction('');
       if (hasMask) clearMask();
       setCritique(''); // clear old critique
-      
+
       if (onImageEdited) onImageEdited(newImage);
 
     } catch (error) {
@@ -470,36 +532,44 @@ CRITICAL REQUIREMENTS:
 
   // NON-DESTRUCTIVE EDITING HELPERS
   const removeEditFromStack = async (indexToRemove: number) => {
-    if (!originalImage || !useNonDestructive) return;
-    
-    const newStack = editStack.filter((_, i) => i !== indexToRemove);
-    setEditStack(newStack);
-    
+    if (!pristineOriginal || !useNonDestructive) return;
+
+    const newStack = currentEditStack.filter((_, i) => i !== indexToRemove);
+    setCurrentEditStack(newStack);
+
     if (newStack.length === 0) {
-      // No edits left, revert to original
-      setCurrentImage(originalImage);
-      showNotification("Reverted to original image");
+      // No edits left, revert to pristine original
+      setCurrentImage(pristineOriginal);
+      showNotification("Reverted to pristine original");
       return;
     }
-    
-    // Re-apply remaining edits
+
+    // Re-apply remaining edits from pristine original
     setIsEditing(true);
     try {
-      const combinedInstruction = newStack.length === 1 
-        ? newStack[0]
-        : `Apply ALL of the following edits simultaneously:\n${newStack.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}`;
-      
+      const allInstructions = newStack.map(e => e.instruction);
+      const combinedInstruction = allInstructions.length === 1
+        ? allInstructions[0]
+        : `Apply ALL of the following edits simultaneously:\n${allInstructions.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}`;
+
       const newImage = await applyEdit(
-        originalImage.url,
+        pristineOriginal.url,
         combinedInstruction,
         [],
         undefined,
         undefined,
-        originalImage.aspectRatio
+        pristineOriginal.aspectRatio
       );
       newImage.projectId = currentProject.id;
       setCurrentImage(newImage);
-      setHistory(prev => [...prev, newImage]);
+
+      // Add to history
+      const newHistoryItem: VersionHistoryItem = {
+        image: newImage,
+        editStack: newStack,
+        timestamp: Date.now()
+      };
+      setHistory(prev => [...prev, newHistoryItem]);
       showNotification(`Edit removed. ${newStack.length} edit(s) remaining.`);
     } catch (error) {
       console.error("Re-rendering failed:", error);
@@ -509,47 +579,79 @@ CRITICAL REQUIREMENTS:
     }
   };
 
-  const resetToOriginal = () => {
-    if (!originalImage) return;
-    setCurrentImage(originalImage);
-    setEditStack([]);
-    showNotification("Reset to original image");
+  // Reset to pristine original - complete clean slate
+  const resetToPristineOriginal = () => {
+    if (!pristineOriginal) return;
+    setCurrentImage(pristineOriginal);
+    setCurrentEditStack([]);
+    showNotification("Reset to pristine original");
   };
 
-  // FINAL RENDER: "Happy Pass" - Clean re-render from original at maximum quality
+  // Restore from version history - branch from that point
+  const restoreFromHistory = (historyItem: VersionHistoryItem, createBranch: boolean = false) => {
+    if (isEditing) return;
+
+    setCurrentImage(historyItem.image);
+    setCurrentEditStack(historyItem.editStack);
+
+    if (createBranch) {
+      // Mark as branch point in history
+      const branchItem: VersionHistoryItem = {
+        ...historyItem,
+        isBranch: true,
+        branchedFrom: currentImage?.id,
+        timestamp: Date.now()
+      };
+      setHistory(prev => [...prev, branchItem]);
+      showNotification(`Branched from "${historyItem.label || 'Version'}" - ${historyItem.editStack.length} edits restored`);
+    } else {
+      showNotification(`Restored "${historyItem.label || 'Version'}" - ${historyItem.editStack.length} edits loaded`);
+    }
+  };
+
+  // FINAL RENDER: "Happy Pass" - Clean re-render from pristine original at maximum quality
   const handleFinalRender = async () => {
-    if (!originalImage || editStack.length === 0) return;
-    
+    if (!pristineOriginal || currentEditStack.length === 0) return;
+
     setIsEditing(true);
     showNotification("🎬 Final Render: Re-applying all edits from pristine original at 4K...");
-    
+
     try {
       // Combine all edits with emphasis on quality
+      const allInstructions = currentEditStack.map(e => e.instruction);
       const combinedInstruction = `FINAL HIGH-QUALITY RENDER - Apply ALL of the following edits to this pristine original image:
-${editStack.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}
+${allInstructions.map((edit, i) => `${i + 1}. ${edit}`).join('\n')}
 
 CRITICAL REQUIREMENTS:
 - Preserve maximum detail and sharpness in areas not explicitly edited
 - Maintain original texture, grain, and micro-details where possible
 - Apply all edits simultaneously for consistency
 - Output at highest quality with no compression artifacts`;
-      
+
       const newImage = await applyEdit(
-        originalImage.url,
+        pristineOriginal.url,
         combinedInstruction,
         references,
         undefined,
         '4K', // Force 4K for final render
-        originalImage.aspectRatio
+        pristineOriginal.aspectRatio
       );
-      
+
       newImage.projectId = currentProject.id;
       setCurrentImage(newImage);
-      setHistory(prev => [...prev, newImage]);
-      
+
+      // Add to history with label
+      const newHistoryItem: VersionHistoryItem = {
+        image: newImage,
+        editStack: currentEditStack,
+        timestamp: Date.now(),
+        label: 'Final Render (4K)'
+      };
+      setHistory(prev => [...prev, newHistoryItem]);
+
       if (onImageEdited) onImageEdited(newImage);
       showNotification("✅ Final Render complete - pristine 4K output from original");
-      
+
     } catch (error) {
       console.error("Final render failed:", error);
       showNotification("❌ Final render failed");
@@ -584,10 +686,10 @@ CRITICAL REQUIREMENTS:
 
   const handleLoadImageToCanvas = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    
+
     const file = files[0];
     if (!file.type.startsWith('image/')) return;
-    
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target?.result as string;
@@ -599,9 +701,14 @@ CRITICAL REQUIREMENTS:
         aspectRatio: '1:1'
       };
       setCurrentImage(newImage);
-      setOriginalImage(newImage);
-      setHistory([newImage]);
-      setEditStack([]);
+      setPristineOriginal(newImage);
+      setCurrentEditStack([]);
+      setHistory([{
+        image: newImage,
+        editStack: [],
+        timestamp: Date.now(),
+        label: 'Original'
+      }]);
       showNotification(`Loaded "${file.name}" for editing`);
     };
     reader.readAsDataURL(file);
@@ -796,9 +903,14 @@ CRITICAL REQUIREMENTS:
                   aspectRatio: 'custom'
               };
               setCurrentImage(newImg);
-              setOriginalImage(newImg); // For non-destructive editing
-              setEditStack([]); // Reset edit stack
-              setHistory([newImg]);
+              setPristineOriginal(newImg); // For non-destructive editing
+              setCurrentEditStack([]); // Reset edit stack
+              setHistory([{
+                image: newImg,
+                editStack: [],
+                timestamp: Date.now(),
+                label: 'Original'
+              }]);
               if (onImageEdited) onImageEdited(newImg);
           };
           reader.readAsDataURL(file);
@@ -810,7 +922,7 @@ CRITICAL REQUIREMENTS:
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         const file = e.dataTransfer.files[0];
         if (!file.type.startsWith('image/')) return;
-        
+
         const reader = new FileReader();
         reader.onload = (ev) => {
             const result = ev.target?.result as string;
@@ -822,16 +934,21 @@ CRITICAL REQUIREMENTS:
                 aspectRatio: 'custom'
             };
             setCurrentImage(newImg);
-            setOriginalImage(newImg); // For non-destructive editing
-            setEditStack([]); // Reset edit stack
-            setHistory([newImg]);
+            setPristineOriginal(newImg); // For non-destructive editing
+            setCurrentEditStack([]); // Reset edit stack
+            setHistory([{
+              image: newImg,
+              editStack: [],
+              timestamp: Date.now(),
+              label: 'Original'
+            }]);
             if (onImageEdited) onImageEdited(newImg);
         };
         reader.readAsDataURL(file);
     }
   };
 
-  const displayImage = showOriginal ? (history[0] || initialImage) : currentImage;
+  const displayImage = showOriginal ? (history[0]?.image || initialImage) : currentImage;
 
   return (
     <div className="flex h-full bg-zinc-950 text-white font-sans selection:bg-violet-500/30">
@@ -1008,14 +1125,18 @@ CRITICAL REQUIREMENTS:
              <div className="relative w-full h-full flex items-center justify-center z-10">
                  {isSplitView ? (
                      <div className="flex w-full h-full gap-4 items-center justify-center p-4">
-                         {/* Original */}
+                         {/* Pristine Original */}
                          <div className="flex-1 h-full flex flex-col relative border border-white/10 bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl">
-                             <div className="absolute top-4 left-4 z-10 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10">ORIGINAL</div>
-                             <img src={history[0].url} className="w-full h-full object-contain" alt="Original" />
+                             <div className="absolute top-4 left-4 z-10 bg-blue-500/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10 flex items-center gap-1">
+                               <Home className="w-3 h-3" /> PRISTINE ORIGINAL
+                             </div>
+                             <img src={pristineOriginal?.url || history[0]?.image.url} className="w-full h-full object-contain" alt="Original" />
                          </div>
                          {/* Current */}
                          <div className="flex-1 h-full flex flex-col relative border border-white/10 bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl">
-                             <div className="absolute top-4 left-4 z-10 bg-violet-500/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10">CURRENT</div>
+                             <div className="absolute top-4 left-4 z-10 bg-violet-500/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white border border-white/10">
+                               CURRENT {currentEditStack.length > 0 && `(${currentEditStack.length} edits)`}
+                             </div>
                              <img src={currentImage.url} className="w-full h-full object-contain" alt="Current" />
                          </div>
                      </div>
@@ -1066,36 +1187,54 @@ CRITICAL REQUIREMENTS:
             onDrop={handleDrop}
         >
            {/* NON-DESTRUCTIVE EDIT STACK PANEL */}
-           {useNonDestructive && editStack.length > 0 && currentImage && (
+           {useNonDestructive && currentEditStack.length > 0 && currentImage && (
              <div className="mx-6 mt-4 bg-zinc-900/80 border border-zinc-700 rounded-xl p-3 backdrop-blur-sm">
                <div className="flex items-center justify-between mb-2">
                  <div className="flex items-center gap-2">
                    <Layers className="w-4 h-4 text-violet-400" />
-                   <span className="text-xs font-bold text-zinc-300">Edit Stack ({editStack.length})</span>
+                   <span className="text-xs font-bold text-zinc-300">Edit Stack ({currentEditStack.length})</span>
                    <span className="text-[10px] text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">Non-destructive</span>
+                   {useChainedEdits ? (
+                     <span className="text-[10px] text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                       🔗 Chained (edits build on canvas)
+                     </span>
+                   ) : (
+                     <span className="text-[10px] text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                       🔄 Re-apply All (from pristine)
+                     </span>
+                   )}
+                   {pristineOriginal && (
+                     <span className="text-[10px] text-zinc-500 bg-zinc-700/50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                       <Home className="w-3 h-3" /> Pristine preserved
+                     </span>
+                   )}
                  </div>
                  <div className="flex items-center gap-2">
-                   <button 
+                   <button
                      onClick={handleFinalRender}
-                     disabled={isEditing || editStack.length === 0}
+                     disabled={isEditing || currentEditStack.length === 0}
                      className="text-[10px] text-violet-400 hover:text-violet-300 bg-violet-500/20 hover:bg-violet-500/30 px-2 py-1 rounded transition-colors flex items-center gap-1 disabled:opacity-50"
-                     title="Re-render all edits from original at maximum quality"
+                     title="Re-render all edits from pristine original at maximum quality"
                    >
                      <Wand2 className="w-3 h-3" /> Final Render
                    </button>
-                   <button 
-                     onClick={resetToOriginal}
+                   <button
+                     onClick={resetToPristineOriginal}
                      className="text-[10px] text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
+                     title="Reset to pristine original (clears all edits)"
                    >
-                     <RotateCcw className="w-3 h-3" /> Reset
+                     <Home className="w-3 h-3" /> Reset to Original
                    </button>
                  </div>
                </div>
                <div className="flex flex-wrap gap-2">
-                 {editStack.map((edit, i) => (
-                   <div key={i} className="flex items-center bg-zinc-800 rounded-lg px-2 py-1 text-[10px] text-zinc-300 max-w-[200px] group">
-                     <span className="truncate" title={edit}>{i + 1}. {edit}</span>
-                     <button 
+                 {currentEditStack.map((edit, i) => (
+                   <div key={edit.id} className="flex items-center bg-zinc-800 rounded-lg px-2 py-1 text-[10px] text-zinc-300 max-w-[200px] group">
+                     <span className="truncate" title={edit.instruction}>
+                       {i + 1}. {edit.instruction.slice(0, 40)}{edit.instruction.length > 40 ? '...' : ''}
+                     </span>
+                     {edit.masked && <span className="ml-1 text-red-400" title="Masked edit">🎭</span>}
+                     <button
                        onClick={() => removeEditFromStack(i)}
                        disabled={isEditing}
                        className="ml-2 text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
@@ -1105,7 +1244,11 @@ CRITICAL REQUIREMENTS:
                    </div>
                  ))}
                </div>
-               <p className="text-[9px] text-zinc-500 mt-2">All edits are applied to the original image simultaneously. Remove any edit to re-render.</p>
+               <p className="text-[9px] text-zinc-500 mt-2">
+                 {useChainedEdits
+                   ? "🔗 Chained mode: Each edit builds on the CURRENT canvas. Use 'Final Render' to clean re-render from pristine."
+                   : "🔄 Re-apply mode: All edits are combined and applied to pristine original each time. Remove any edit to re-render."}
+               </p>
              </div>
            )}
 
@@ -1116,15 +1259,36 @@ CRITICAL REQUIREMENTS:
                 <button
                   onClick={() => setUseNonDestructive(!useNonDestructive)}
                   className={`shrink-0 px-3 py-2 text-[10px] rounded-full border transition-all font-medium ${
-                    useNonDestructive 
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                    useNonDestructive
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                       : 'bg-zinc-800/50 text-zinc-500 border-zinc-700 hover:text-zinc-300'
                   }`}
-                  title={useNonDestructive ? "Non-destructive: Edits combine on original" : "Destructive: Each edit builds on previous"}
+                  title={useNonDestructive ? "Non-destructive: Edit stack is tracked" : "Destructive: No edit stack tracking"}
                 >
                   <Layers className="w-3 h-3 inline mr-1" />
                   {useNonDestructive ? 'Stack Mode' : 'Layer Mode'}
                 </button>
+
+                {/* Chained Edits Toggle - Only show when in non-destructive mode */}
+                {useNonDestructive && (
+                  <button
+                    onClick={() => setUseChainedEdits(!useChainedEdits)}
+                    className={`shrink-0 px-3 py-2 text-[10px] rounded-full border transition-all font-medium ${
+                      useChainedEdits
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                    }`}
+                    title={useChainedEdits
+                      ? "🔗 Chained: Each edit builds on CURRENT canvas (recommended)"
+                      : "🔄 Re-apply: All edits combined on PRISTINE original each time"}
+                  >
+                    {useChainedEdits ? (
+                      <>🔗 Chained</>
+                    ) : (
+                      <>🔄 Re-apply All</>
+                    )}
+                  </button>
+                )}
 
                 {/* Lookbook Style Toggle */}
                 {productionDesign && (productionDesign.visualStyle || productionDesign.styleRefs?.length) && (
@@ -1302,41 +1466,87 @@ CRITICAL REQUIREMENTS:
 
       {/* Right Panel: History / Layers */}
       <div className="w-80 glass-panel border-l border-white/5 p-6 hidden lg:flex flex-col shrink-0 z-20">
-        <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-6 flex items-center gap-2"><Layers className="w-4 h-4" /> Version History</h3>
-        
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+            <Layers className="w-4 h-4" /> Version History
+          </h3>
+          {pristineOriginal && (
+            <button
+              onClick={resetToPristineOriginal}
+              className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+              title="Reset to pristine original"
+            >
+              <Home className="w-3 h-3" /> Pristine
+            </button>
+          )}
+        </div>
+
         {history.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-zinc-600 text-xs text-center px-4 font-medium">
                 No edit history yet.
             </div>
         ) : (
             <div className="space-y-5 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-            {[...history].reverse().map((img, idx) => (
-                <div 
-                    key={img.id} 
-                    onClick={() => {
-                        if (!isEditing) {
-                            setCurrentImage(img);
-                            if (img.prompt !== 'Uploaded Canvas') {
-                                setInstruction(img.prompt);
-                            }
-                        }
-                    }}
-                    className={`cursor-pointer rounded-2xl border transition-all duration-300 overflow-hidden bg-zinc-900 group relative ${img.id === currentImage?.id ? 'border-violet-500/50 ring-2 ring-violet-500/20 shadow-xl' : 'border-white/5 hover:border-white/20 opacity-60 hover:opacity-100 hover:scale-[1.02]'}`}
+            {[...history].reverse().map((historyItem, idx) => {
+                const isOriginal = idx === history.length - 1;
+                const editNum = history.length - 1 - idx;
+                const isCurrent = historyItem.image.id === currentImage?.id;
+
+                return (
+                <div
+                    key={historyItem.image.id}
+                    className={`cursor-pointer rounded-2xl border transition-all duration-300 overflow-hidden bg-zinc-900 group relative ${isCurrent ? 'border-violet-500/50 ring-2 ring-violet-500/20 shadow-xl' : 'border-white/5 hover:border-white/20 opacity-60 hover:opacity-100 hover:scale-[1.02]'}`}
                 >
-                <img src={img.url} alt="Thumbnail" className="w-full h-36 object-cover" />
-                <div className="p-4 bg-zinc-900/90 backdrop-blur-sm border-t border-white/5">
-                    <div className="text-[10px] uppercase text-zinc-500 mb-1.5 font-bold tracking-wider">{idx === history.length - 1 ? 'Original' : `Edit #${history.length - 1 - idx}`}</div>
-                    <div className="text-xs text-zinc-300 truncate font-medium">
-                    {img.prompt}
+                  <div onClick={() => restoreFromHistory(historyItem, false)}>
+                    <img src={historyItem.image.url} alt="Thumbnail" className="w-full h-36 object-cover" />
+                    <div className="p-4 bg-zinc-900/90 backdrop-blur-sm border-t border-white/5">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-[10px] uppercase text-zinc-500 font-bold tracking-wider">
+                            {historyItem.label || (isOriginal ? 'Original' : `Edit #${editNum}`)}
+                          </span>
+                          {historyItem.isBranch && (
+                            <GitBranch className="w-3 h-3 text-amber-400" title="Branch point" />
+                          )}
+                          {historyItem.editStack.length > 0 && (
+                            <span className="text-[9px] text-violet-400 bg-violet-500/20 px-1.5 py-0.5 rounded">
+                              {historyItem.editStack.length} edit{historyItem.editStack.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-zinc-300 truncate font-medium">
+                          {historyItem.image.prompt}
+                        </div>
                     </div>
-                </div>
-                {img.id === currentImage?.id && (
-                    <div className="absolute top-3 right-3 bg-violet-600 text-white p-1 rounded-full shadow-lg">
-                        <Check className="w-3 h-3" />
+                  </div>
+
+                  {/* Branch button - creates new edit path from this version */}
+                  {!isCurrent && !isOriginal && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        restoreFromHistory(historyItem, true);
+                      }}
+                      className="absolute top-2 left-2 bg-amber-500/80 hover:bg-amber-400 text-black p-1.5 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-all"
+                      title="Branch from this version"
+                    >
+                      <GitBranch className="w-3 h-3" />
+                    </button>
+                  )}
+
+                  {isCurrent && (
+                      <div className="absolute top-3 right-3 bg-violet-600 text-white p-1 rounded-full shadow-lg">
+                          <Check className="w-3 h-3" />
+                      </div>
+                  )}
+
+                  {isOriginal && (
+                    <div className="absolute top-3 right-3 bg-blue-600 text-white p-1 rounded-full shadow-lg" title="Pristine original">
+                      <Home className="w-3 h-3" />
                     </div>
-                )}
+                  )}
                 </div>
-            ))}
+              );
+            })}
             </div>
         )}
       </div>

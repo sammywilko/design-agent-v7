@@ -6,10 +6,11 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
     X, Upload, Camera, Lock, Unlock, Loader2, Sparkles, User,
-    Palette, CheckCircle, AlertCircle, Image as ImageIcon, Trash2
+    Palette, CheckCircle, AlertCircle, Image as ImageIcon, Trash2, Eye, Scan
 } from 'lucide-react';
-import { CharacterProfile, ProjectDefaultStyle, StyleDNA } from '../types';
+import { CharacterProfile, ProjectDefaultStyle, StyleDNA, ReferenceVocabulary } from '../types';
 import { generateStylizedCharacterFromPhotoFast, extractStyleDNAFromImage, PhotoRealismMode } from '../services/gemini';
+import { ReferenceIntelligenceService } from '../services/referenceIntelligence';
 
 interface PhotoToCharacterModalProps {
     isOpen: boolean;
@@ -46,6 +47,10 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
 
     // Result
     const [generatedCharacter, setGeneratedCharacter] = useState<CharacterProfile | null>(null);
+
+    // Reference Intelligence - Visual Vocabulary
+    const [isExtractingVocabulary, setIsExtractingVocabulary] = useState(false);
+    const [extractedVocabulary, setExtractedVocabulary] = useState<ReferenceVocabulary | null>(null);
 
     const styleInputRef = useRef<HTMLInputElement>(null);
     const photoInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +113,32 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
         }
     };
 
+    // Extract Visual Vocabulary from generated character
+    const extractVisualVocabulary = async (characterImage: string): Promise<ReferenceVocabulary | null> => {
+        try {
+            setIsExtractingVocabulary(true);
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+            if (!apiKey) {
+                console.warn('No API key for vocabulary extraction');
+                return null;
+            }
+
+            const refIntelligence = new ReferenceIntelligenceService(apiKey);
+            const vocabulary = await refIntelligence.extractReferenceVocabulary(
+                [characterImage],
+                'character'
+            );
+
+            setExtractedVocabulary(vocabulary);
+            return vocabulary;
+        } catch (error) {
+            console.error('Vocabulary extraction failed:', error);
+            return null;
+        } finally {
+            setIsExtractingVocabulary(false);
+        }
+    };
+
     // Generate stylized character
     const handleGenerate = async () => {
         if (!personPhoto) {
@@ -144,8 +175,20 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
             // Add style tracking to the character
             result.characterProfile.styleApplied = styleToUse.id;
 
+            // Extract Visual Vocabulary automatically after generation
+            if (result.characterProfile.imageRefs?.[0]) {
+                const vocabulary = await extractVisualVocabulary(result.characterProfile.imageRefs[0]);
+                if (vocabulary) {
+                    result.characterProfile.referenceVocabulary = vocabulary;
+                    showNotification(`${characterName} created with Visual Vocabulary (${vocabulary.confidenceScore}% confidence)!`, 'success');
+                } else {
+                    showNotification(`${characterName} created successfully!`, 'success');
+                }
+            } else {
+                showNotification(`${characterName} created successfully!`, 'success');
+            }
+
             setGeneratedCharacter(result.characterProfile);
-            showNotification(`${characterName} created successfully!`, 'success');
         } catch (error) {
             console.error('Character generation failed:', error);
             showNotification('Generation failed. Please try again.', 'error');
@@ -173,6 +216,7 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
         setCharacterName('');
         setRealismMode('stylized');
         setGeneratedCharacter(null);
+        setExtractedVocabulary(null);
         onClose();
     };
 
@@ -549,6 +593,87 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
                                                 <span className="px-2 py-1 bg-zinc-700 rounded text-xs text-zinc-300">{generatedCharacter.extractedSpecs.hairStyle}</span>
                                                 <span className="px-2 py-1 bg-zinc-700 rounded text-xs text-zinc-300">{generatedCharacter.extractedSpecs.bodyType}</span>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {/* Visual Vocabulary - Reference Intelligence */}
+                                    {(extractedVocabulary || isExtractingVocabulary) && (
+                                        <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <h4 className="font-medium text-white flex items-center gap-2">
+                                                    {isExtractingVocabulary ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+                                                    ) : (
+                                                        <Scan className="w-4 h-4 text-purple-400" />
+                                                    )}
+                                                    Visual Vocabulary
+                                                </h4>
+                                                {extractedVocabulary && (
+                                                    <span className="text-xs text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full">
+                                                        {extractedVocabulary.confidenceScore}% confidence
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {isExtractingVocabulary ? (
+                                                <p className="text-xs text-purple-300">Analyzing visual patterns for consistency enforcement...</p>
+                                            ) : extractedVocabulary && (
+                                                <>
+                                                    {/* Lighting DNA */}
+                                                    {extractedVocabulary.lightingDNA.confidence > 60 && (
+                                                        <div className="text-sm">
+                                                            <span className="text-zinc-400">Lighting:</span>{' '}
+                                                            <span className="text-white">
+                                                                {extractedVocabulary.lightingDNA.keyLight.direction}, {' '}
+                                                                {extractedVocabulary.lightingDNA.keyLight.quality} quality, {' '}
+                                                                {extractedVocabulary.lightingDNA.fillRatio} fill
+                                                            </span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Color Science */}
+                                                    {extractedVocabulary.colorScience.dominantColors.length > 0 && (
+                                                        <div className="text-sm flex items-center gap-2">
+                                                            <span className="text-zinc-400">Colors:</span>
+                                                            <div className="flex gap-1">
+                                                                {extractedVocabulary.colorScience.dominantColors.slice(0, 4).map((c, i) => (
+                                                                    <div
+                                                                        key={i}
+                                                                        className="w-5 h-5 rounded border border-white/20"
+                                                                        style={{ backgroundColor: c.hex }}
+                                                                        title={`${c.name} (${c.percentage}%)`}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                            <span className="text-white text-xs">
+                                                                {extractedVocabulary.colorScience.colorGrade} grade
+                                                            </span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Pose Vocabulary */}
+                                                    {extractedVocabulary.poseVocabulary.length > 0 && (
+                                                        <div className="text-sm">
+                                                            <span className="text-zinc-400">Pose:</span>{' '}
+                                                            <span className="text-white">
+                                                                {extractedVocabulary.poseVocabulary[0].bodyAngle}, {' '}
+                                                                {extractedVocabulary.poseVocabulary[0].gesture}
+                                                            </span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Style Fingerprint */}
+                                                    {extractedVocabulary.styleFingerprint && extractedVocabulary.styleFingerprint !== 'No distinct style fingerprint extracted' && (
+                                                        <div className="text-xs text-purple-200/70 italic pt-2 border-t border-purple-500/20">
+                                                            {extractedVocabulary.styleFingerprint}
+                                                        </div>
+                                                    )}
+
+                                                    <p className="text-[10px] text-purple-400/60 pt-1">
+                                                        This vocabulary will enforce visual consistency in all future generations with this character.
+                                                    </p>
+                                                </>
+                                            )}
                                         </div>
                                     )}
 

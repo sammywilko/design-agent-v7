@@ -694,6 +694,286 @@ export const CONTACT_SHEET_12 = [
   { type: "Over The Shoulder", angle: "Medium", description: "POV/Dialogue setup" }
 ];
 
+// ============================================
+// CINEMATIC 9-SHOT CONTACT SHEET
+// ============================================
+
+export type ContentStylePreset = 'documentary' | 'commercial' | 'narrative' | 'fashion' | 'music-video';
+
+export interface CinematicShotSpec {
+  id: string;
+  shotType: 'ELS' | 'LS' | 'MLS' | 'MS' | 'MCU' | 'CU' | 'ECU' | 'LOW' | 'HIGH';
+  label: string;
+  description: string;
+  cameraHeight: string;
+  focalLength: string;
+  purpose: string;
+  promptTemplate: string;
+}
+
+// The cinematographic 9-shot grid (3x3)
+export const CINEMATIC_9_SHOT_GRID: CinematicShotSpec[] = [
+  {
+    id: 'els',
+    shotType: 'ELS',
+    label: 'Extreme Long Shot',
+    description: 'Subject is a small element in vast environment',
+    cameraHeight: '100-500ft aerial or distant ground',
+    focalLength: '16-24mm wide',
+    purpose: 'Establishes world, shows scale, isolation',
+    promptTemplate: 'Extreme Long Shot (ELS). Subject tiny in vast environment. {subject} dwarfed by {environment}. Wide angle 16mm lens, deep focus, epic scale.'
+  },
+  {
+    id: 'ls',
+    shotType: 'LS',
+    label: 'Long Shot',
+    description: 'Full body with significant environment',
+    cameraHeight: 'Eye level, 20-50ft distance',
+    focalLength: '24-35mm',
+    purpose: 'Character introduction, establishing behavior',
+    promptTemplate: 'Long Shot (LS). Full body head-to-toe with environment context. {subject} in {environment}. 35mm lens, shows complete figure and surroundings.'
+  },
+  {
+    id: 'mls',
+    shotType: 'MLS',
+    label: 'Medium Long Shot',
+    description: 'Knees up, movement visible',
+    cameraHeight: 'Eye level, 10-15ft distance',
+    focalLength: '35-50mm',
+    purpose: 'Walking/talking, group dynamics',
+    promptTemplate: 'Medium Long Shot (MLS). Knees-up framing, body language visible. {subject} with room for movement. 50mm lens, balanced figure and environment.'
+  },
+  {
+    id: 'ms',
+    shotType: 'MS',
+    label: 'Medium Shot',
+    description: 'Waist up, standard coverage',
+    cameraHeight: 'Eye level, 6-10ft distance',
+    focalLength: '50mm standard',
+    purpose: 'Dialogue, standard scene coverage',
+    promptTemplate: 'Medium Shot (MS). Waist-up framing, interview standard. {subject} at conversational distance. 50mm lens, natural perspective, clear face and gesture.'
+  },
+  {
+    id: 'mcu',
+    shotType: 'MCU',
+    label: 'Medium Close-Up',
+    description: 'Chest up, emotional emphasis',
+    cameraHeight: 'Eye level, 4-6ft distance',
+    focalLength: '50-85mm portrait',
+    purpose: 'Key dialogue, reaction shots',
+    promptTemplate: 'Medium Close-Up (MCU). Chest-up framing, emotional connection. {subject} intimate but not intrusive. 85mm portrait lens, slight background blur, expressive.'
+  },
+  {
+    id: 'cu',
+    shotType: 'CU',
+    label: 'Close-Up',
+    description: 'Face fills frame, maximum emotion',
+    cameraHeight: 'Eye level, 2-4ft distance',
+    focalLength: '85-135mm telephoto',
+    purpose: 'Emotional peaks, truth/lies, decisions',
+    promptTemplate: 'Close-Up (CU). Face fills frame, eyes are anchor point. {subject} intimate portrait. 85mm lens, shallow depth of field, intense emotional detail.'
+  },
+  {
+    id: 'ecu',
+    shotType: 'ECU',
+    label: 'Extreme Close-Up',
+    description: 'Detail shot - eyes, hands, objects',
+    cameraHeight: 'Variable, 1-2ft distance',
+    focalLength: '100mm+ macro',
+    purpose: 'Critical detail, psychological intensity',
+    promptTemplate: 'Extreme Close-Up (ECU). Single detail fills frame. {subject} eyes or key detail. Macro lens, ultra-shallow focus, maximum intensity and intimacy.'
+  },
+  {
+    id: 'low',
+    shotType: 'LOW',
+    label: 'Low Angle Hero',
+    description: 'Camera below eye level looking up',
+    cameraHeight: 'Ground level to knee height',
+    focalLength: '24-35mm wide',
+    purpose: 'Power, dominance, aspiration',
+    promptTemplate: 'Low Angle Shot. Camera at ground level looking UP at {subject}. {subject} appears powerful and dominant. Wide 24mm lens, subject looms heroically.'
+  },
+  {
+    id: 'high',
+    shotType: 'HIGH',
+    label: 'High Angle',
+    description: 'Camera above eye level looking down',
+    cameraHeight: '10-20ft elevated',
+    focalLength: '35-50mm',
+    purpose: 'Vulnerability, overview, surveillance',
+    promptTemplate: 'High Angle Shot. Camera elevated looking DOWN at {subject}. {subject} appears smaller, vulnerable. 35mm lens, overhead perspective, contextual.'
+  }
+];
+
+// Style-specific lighting and mood modifiers
+export const STYLE_MODIFIERS: Record<ContentStylePreset, { lighting: string; mood: string; colorGrade: string }> = {
+  'documentary': {
+    lighting: 'Natural available light, motivated practicals, documentary realism',
+    mood: 'Authentic, observational, truth-seeking',
+    colorGrade: 'Neutral color science, minimal grading, realistic skin tones'
+  },
+  'commercial': {
+    lighting: 'High key professional lighting, clean and bright, product visibility',
+    mood: 'Professional, trustworthy, polished',
+    colorGrade: 'Clean neutral whites, brand-appropriate accent colors'
+  },
+  'narrative': {
+    lighting: 'Motivated cinematic lighting, dramatic key/fill ratio, atmosphere',
+    mood: 'Story-driven, emotionally engaging, character-focused',
+    colorGrade: 'Cinematic color grade, story-appropriate palette'
+  },
+  'fashion': {
+    lighting: 'Editorial beauty lighting, sculpted highlights, fashion photography',
+    mood: 'Aspirational, beautiful, style-forward',
+    colorGrade: 'Fashion-forward color palette, high-end editorial look'
+  },
+  'music-video': {
+    lighting: 'Dramatic creative lighting, colored gels, high contrast',
+    mood: 'Energetic, iconic, performance-driven',
+    colorGrade: 'Bold creative grade, genre-appropriate color treatment'
+  }
+};
+
+// Entity Lock - for consistent character/location/product across shots
+export interface EntityLock {
+  type: 'character' | 'location' | 'product';
+  name: string;
+  promptSnippet: string;
+  referenceImages: string[];  // Base64 references for visual consistency
+}
+
+// QC Badge status
+export type QCStatus = 'pass' | 'warning' | 'fail' | 'pending';
+
+export interface ShotQCResult {
+  status: QCStatus;
+  entityConsistency: number;  // 0-100%
+  compositionScore: number;   // 0-100%
+  technicalQuality: number;   // 0-100%
+  issues: string[];
+  suggestions: string[];
+}
+
+// Enhanced Contact Sheet Result
+export interface CinematicContactSheetResult {
+  shots: Array<{
+    spec: CinematicShotSpec;
+    image?: GeneratedImage;
+    failed?: boolean;
+    error?: string;
+    qc?: ShotQCResult;
+    promptUsed?: string;
+  }>;
+  entityLocks: EntityLock[];
+  stylePreset: ContentStylePreset;
+  successCount: number;
+  totalCount: number;
+  overallQC?: {
+    averageScore: number;
+    passCount: number;
+    warningCount: number;
+    failCount: number;
+  };
+}
+
+/**
+ * Generate the Cinematic 9-Shot Contact Sheet with entity locking
+ */
+export const generateCinematic9ShotSheet = async (
+  subjectDescription: string,
+  sceneContext: string,
+  stylePreset: ContentStylePreset,
+  entityLocks: EntityLock[],
+  references: ReferenceAsset[],
+  config: GenerationConfig,
+  onProgress?: (completed: number, total: number, currentShot: string) => void
+): Promise<CinematicContactSheetResult> => {
+  const styleModifier = STYLE_MODIFIERS[stylePreset];
+
+  const shots = CINEMATIC_9_SHOT_GRID.map(spec => ({
+    spec,
+    image: undefined as GeneratedImage | undefined,
+    failed: false,
+    error: undefined as string | undefined,
+    qc: undefined as ShotQCResult | undefined,
+    promptUsed: undefined as string | undefined
+  }));
+
+  let completed = 0;
+
+  // Build entity DNA for prompt injection
+  const entityDNA = entityLocks.map(lock =>
+    `[${lock.type.toUpperCase()}: ${lock.name}] ${lock.promptSnippet}`
+  ).join('\n');
+
+  // Combine all entity references with existing references
+  const allReferences = [
+    ...references,
+    ...entityLocks.flatMap(lock =>
+      lock.referenceImages.map((img, idx) => ({
+        id: `${lock.name}-ref-${idx}`,
+        data: img,
+        type: lock.type === 'character' ? 'Character' as const :
+              lock.type === 'location' ? 'Location' as const : 'Product' as const,
+        name: lock.name
+      }))
+    )
+  ];
+
+  // Process in batches of 3 for rate limiting
+  for (let i = 0; i < shots.length; i += 3) {
+    const batch = shots.slice(i, Math.min(i + 3, shots.length));
+
+    const batchPromises = batch.map(async (shot, batchIdx) => {
+      const shotIdx = i + batchIdx;
+
+      // Build the shot-specific prompt using template
+      const shotPrompt = shot.spec.promptTemplate
+        .replace('{subject}', subjectDescription)
+        .replace('{environment}', sceneContext);
+
+      // Full prompt with entity DNA and style modifiers
+      const fullPrompt = `CINEMATIC FILM STILL. ${shotPrompt}
+
+ENTITY DNA (maintain exact visual consistency):
+${entityDNA || 'No locked entities'}
+
+STYLE: ${stylePreset.toUpperCase()}
+LIGHTING: ${styleModifier.lighting}
+MOOD: ${styleModifier.mood}
+COLOR: ${styleModifier.colorGrade}
+
+SCENE: ${sceneContext}
+
+Photorealistic 4K cinematic quality. Film grain. Professional cinematography.`;
+
+      shots[shotIdx].promptUsed = fullPrompt;
+
+      try {
+        const img = await generateImage(fullPrompt, allReferences, config, false);
+        shots[shotIdx].image = img;
+        completed++;
+        onProgress?.(completed, shots.length, `${shot.spec.label}`);
+      } catch (error: any) {
+        shots[shotIdx].failed = true;
+        shots[shotIdx].error = error?.message || 'Generation failed';
+        completed++;
+        onProgress?.(completed, shots.length, `${shot.spec.label} (FAILED)`);
+      }
+    });
+
+    await Promise.all(batchPromises);
+  }
+
+  return {
+    shots,
+    entityLocks,
+    stylePreset,
+    successCount: shots.filter(s => s.image).length,
+    totalCount: shots.length
+  };
+};
+
 // Dialogue coverage pack (5 shots)
 export const COVERAGE_PACK_DIALOGUE = [
   { type: "Wide", angle: "Master Shot", description: "Establishes both characters" },

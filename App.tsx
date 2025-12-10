@@ -13,6 +13,7 @@ import MoodBoardPanel from './components/MoodBoardPanel';
 import ProducerChat from './components/ProducerChat';
 import CollaborationPanel from './components/CollaborationPanel';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import DownloadModal from './components/DownloadModal';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -82,6 +83,9 @@ const App: React.FC = () => {
   // Keyboard Shortcuts Modal
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
+  // Download Modal
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+
   // Undo System for Agent Actions
   const [scriptHistory, setScriptHistory] = useState<ScriptData[]>([]);
   const MAX_UNDO_HISTORY = 20;
@@ -122,6 +126,24 @@ const App: React.FC = () => {
     if (currentProject) {
       const loadData = async () => {
           setIsLoadingData(true);
+
+          // CRITICAL: Clear ALL state before loading new project data
+          // This prevents cross-contamination between projects
+          setGlobalHistory([]);
+          setLibraryAssets([]);
+          setScriptData(undefined);
+          setMoodBoards([]);
+          setWorkingImage(null);
+          setEditQueue([]);
+          setHasUnsavedEdits(false);
+          setVideoStartFrame(null);
+          setVideoEndFrame(null);
+          setVideoPrompt('');
+          setIncomingBeatPrompt(null);
+          setIncomingGhostBeats(null);
+          setIncomingCharacter(null);
+          setScriptHistory([]); // Clear undo history too
+
           try {
               const [history, library, savedScript, savedMoodBoards] = await Promise.all([
                   db.getHistory(currentProject.id),
@@ -131,7 +153,8 @@ const App: React.FC = () => {
               ]);
               setGlobalHistory(history);
               setLibraryAssets(library);
-              if (savedScript) setScriptData(savedScript);
+              // FIXED: Always set scriptData, even if null (for new projects)
+              setScriptData(savedScript || undefined);
               setMoodBoards(savedMoodBoards);
 
           } catch (e) {
@@ -843,29 +866,152 @@ const App: React.FC = () => {
   const handleExportZip = async () => {
       if (!currentProject) return;
       setIsExporting(true);
-      showNotification("Preparing ZIP archive...");
+      showNotification("Preparing ZIP archive with sequential panel naming...");
 
       try {
           const zip = new JSZip();
           const folderName = currentProject.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
           const root = zip.folder(folderName);
 
+          // Helper to sanitize filenames
+          const sanitize = (str: string) => str.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 30);
+
+          // === STORYBOARD PANELS (Sequential Naming) ===
+          // Creates: panels/001_beat_name.png, panels/002.1_start.png, panels/002.2_end.png
+          const panelsFolder = root?.folder("panels");
+          let panelCounter = 1;
+
+          if (scriptData?.beats) {
+            for (const beat of scriptData.beats) {
+              // Get beat name for the filename prefix
+              const beatName = beat.visualSummary
+                ? sanitize(beat.visualSummary.slice(0, 20))
+                : `beat_${panelCounter}`;
+
+              // Check for generated images on this beat
+              if (beat.generatedImageIds && beat.generatedImageIds.length > 0) {
+                // Find the images for this beat
+                for (let shotIdx = 0; shotIdx < beat.generatedImageIds.length; shotIdx++) {
+                  const imgId = beat.generatedImageIds[shotIdx];
+                  const img = globalHistory.find(h => h.id === imgId);
+                  if (img) {
+                    const base64Data = img.url.split(',')[1];
+                    if (base64Data) {
+                      // Format: 001_beatname.png or 001.1, 001.2 for multiple shots
+                      const shotSuffix = beat.generatedImageIds.length > 1 ? `.${shotIdx + 1}` : '';
+                      const paddedNum = String(panelCounter).padStart(3, '0');
+                      panelsFolder?.file(`${paddedNum}${shotSuffix}_${beatName}.png`, base64Data, { base64: true });
+                    }
+                  }
+                }
+              }
+
+              // Check for sequence grid (4-up coverage)
+              if (beat.sequenceGrid) {
+                const base64Data = beat.sequenceGrid.split(',')[1];
+                if (base64Data) {
+                  const paddedNum = String(panelCounter).padStart(3, '0');
+                  panelsFolder?.file(`${paddedNum}_${beatName}_grid.png`, base64Data, { base64: true });
+                }
+              }
+
+              panelCounter++;
+            }
+          }
+
+          // === LINKED BEAT IMAGES (for start/end frame workflows) ===
+          // Images linked to beats via linkedBeatId get proper naming
+          const linkedImages = globalHistory.filter(img => img.linkedBeatId);
+          const beatImageGroups = new Map<string, GeneratedImage[]>();
+
+          linkedImages.forEach(img => {
+            if (img.linkedBeatId) {
+              const existing = beatImageGroups.get(img.linkedBeatId) || [];
+              existing.push(img);
+              beatImageGroups.set(img.linkedBeatId, existing);
+            }
+          });
+
+          let linkedPanelCounter = 1;
+          beatImageGroups.forEach((images, beatId) => {
+            const beat = scriptData?.beats.find(b => b.id === beatId);
+            const beatName = beat?.visualSummary
+              ? sanitize(beat.visualSummary.slice(0, 20))
+              : `linked_${linkedPanelCounter}`;
+
+            images.forEach((img, frameIdx) => {
+              const base64Data = img.url.split(',')[1];
+              if (base64Data) {
+                const paddedNum = String(linkedPanelCounter).padStart(3, '0');
+                // .1 = start frame, .2 = end frame pattern
+                const frameSuffix = images.length > 1 ? `.${frameIdx + 1}` : '';
+                panelsFolder?.file(`${paddedNum}${frameSuffix}_${beatName}_linked.png`, base64Data, { base64: true });
+              }
+            });
+            linkedPanelCounter++;
+          });
+
+          // === ALL GENERATIONS (legacy folder for non-beat images) ===
           const historyFolder = root?.folder("generations");
           globalHistory.forEach((img, idx) => {
+              // Skip images already exported as panels
+              if (img.linkedBeatId) return;
+
               const base64Data = img.url.split(',')[1];
               if(base64Data) {
-                  historyFolder?.file(`gen_${idx + 1}_${img.prompt.slice(0, 15).replace(/\s/g, '_')}.png`, base64Data, { base64: true });
+                  const paddedIdx = String(idx + 1).padStart(3, '0');
+                  const promptSlug = sanitize(img.prompt.slice(0, 20));
+                  historyFolder?.file(`${paddedIdx}_${promptSlug}.png`, base64Data, { base64: true });
               }
           });
 
+          // === LIBRARY ASSETS ===
           const libraryFolder = root?.folder("library");
           libraryAssets.forEach((asset, idx) => {
               const base64Data = asset.data.split(',')[1];
               if(base64Data) {
-                  libraryFolder?.file(`lib_${asset.type}_${asset.name.replace(/\s/g, '_')}.png`, base64Data, { base64: true });
+                  const paddedIdx = String(idx + 1).padStart(3, '0');
+                  libraryFolder?.file(`${paddedIdx}_${asset.type}_${sanitize(asset.name)}.png`, base64Data, { base64: true });
               }
           });
 
+          // === CHARACTER SHEETS ===
+          if (scriptData?.characters && scriptData.characters.length > 0) {
+            const charactersFolder = root?.folder("characters");
+            scriptData.characters.forEach((char, idx) => {
+              if (char.characterSheet) {
+                const base64Data = char.characterSheet.split(',')[1];
+                if (base64Data) {
+                  const paddedIdx = String(idx + 1).padStart(2, '0');
+                  charactersFolder?.file(`${paddedIdx}_${sanitize(char.name)}_sheet.png`, base64Data, { base64: true });
+                }
+              }
+              // Also export expression banks
+              if (char.expressionBank?.grid) {
+                const base64Data = char.expressionBank.grid.split(',')[1];
+                if (base64Data) {
+                  const paddedIdx = String(idx + 1).padStart(2, '0');
+                  charactersFolder?.file(`${paddedIdx}_${sanitize(char.name)}_expressions.png`, base64Data, { base64: true });
+                }
+              }
+            });
+          }
+
+          // === LOCATION PLATES ===
+          if (scriptData?.locations && scriptData.locations.length > 0) {
+            const locationsFolder = root?.folder("locations");
+            scriptData.locations.forEach((loc, idx) => {
+              if (loc.anchorImage) {
+                const base64Data = loc.anchorImage.split(',')[1];
+                if (base64Data) {
+                  const paddedIdx = String(idx + 1).padStart(2, '0');
+                  locationsFolder?.file(`${paddedIdx}_${sanitize(loc.name || 'location')}_plate.png`, base64Data, { base64: true });
+                }
+              }
+            });
+          }
+
+          // === SCRIPT DATA (JSON) ===
           if (scriptData) {
               root?.file("script.json", JSON.stringify(scriptData, null, 2));
           }
@@ -877,8 +1023,8 @@ const App: React.FC = () => {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          
-          showNotification("Project exported successfully!");
+
+          showNotification(`Project exported! Panels numbered sequentially (${panelCounter - 1} beats)`);
 
       } catch (e) {
           console.error("Export failed", e);
@@ -1266,6 +1412,15 @@ ${clips}
     <div className="h-screen w-screen flex flex-col bg-zinc-950 overflow-hidden font-sans relative text-white">
       <WelcomeGuide isOpen={showWelcomeGuide} onClose={closeWelcomeGuide} />
       <KeyboardShortcutsModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <DownloadModal
+          isOpen={showDownloadModal}
+          onClose={() => setShowDownloadModal(false)}
+          projectName={currentProject.name}
+          globalHistory={globalHistory}
+          libraryAssets={libraryAssets}
+          scriptData={scriptData}
+          showNotification={showNotification}
+      />
 
       {toast && (
           <div className={`fixed bottom-8 right-8 z-[100] backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 flex items-center gap-3 max-w-md ${
@@ -1384,7 +1539,7 @@ ${clips}
             <button onClick={handleExportShotList} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Export Shot List (CSV)">
                 <FileSpreadsheet className="w-5 h-5" />
             </button>
-            <button onClick={handleExportZip} disabled={isExporting} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Download Project ZIP">
+            <button onClick={() => setShowDownloadModal(true)} disabled={isExporting} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Download Project ZIP">
                 {isExporting ? <Loader2 className="w-5 h-5 animate-spin"/> : <DownloadCloud className="w-5 h-5" />}
             </button>
             <button onClick={() => setShowShortcutsModal(true)} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Keyboard Shortcuts (?)">
