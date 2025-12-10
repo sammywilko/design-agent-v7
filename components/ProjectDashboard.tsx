@@ -27,7 +27,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
     <div className="flex h-full w-full bg-slate-950 text-white items-center justify-center p-8">
       <div className="max-w-4xl w-full">
         <div className="mb-12 text-center">
-            <h1 className="text-4xl font-light tracking-tight mb-2">Design Agent <span className="text-violet-500 font-bold">7.0</span></h1>
+            <h1 className="text-4xl font-light tracking-tight mb-2">Design Agent <span className="text-violet-500 font-bold">8.0</span><span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">BETA</span></h1>
             <p className="text-slate-400">Select a project to begin your studio session.</p>
         </div>
 

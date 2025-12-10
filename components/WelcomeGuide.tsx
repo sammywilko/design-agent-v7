@@ -304,7 +304,7 @@ const WelcomeGuide: React.FC<WelcomeGuideProps> = ({ isOpen, onClose }) => {
       {/* Sidebar */}
       <div className="w-72 bg-black/20 border-r border-white/5 flex flex-col p-6 shrink-0">
         <div className="mb-8">
-          <h2 className="text-xl font-bold text-white mb-1 tracking-tight">Design Agent <span className="text-violet-400">7.0</span></h2>
+          <h2 className="text-xl font-bold text-white mb-1 tracking-tight">Design Agent <span className="text-violet-400">8.0</span><span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full font-medium">BETA</span></h2>
           <p className="text-zinc-500 text-xs font-medium">Complete Guide</p>
         </div>
 
