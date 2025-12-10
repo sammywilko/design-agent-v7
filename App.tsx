@@ -15,6 +15,9 @@ import CollaborationPanel from './components/CollaborationPanel';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import DownloadModal from './components/DownloadModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import AuthModal from './components/AuthModal';
+import UserMenu from './components/UserMenu';
+import { AuthProvider } from './hooks/useAuth';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -86,6 +89,9 @@ const App: React.FC = () => {
 
   // Download Modal
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+
+  // Auth Modal
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Undo System for Agent Actions
   const [scriptHistory, setScriptHistory] = useState<ScriptData[]>([]);
@@ -1413,6 +1419,7 @@ ${clips}
     <div className="h-screen w-screen flex flex-col bg-zinc-950 overflow-hidden font-sans relative text-white">
       <WelcomeGuide isOpen={showWelcomeGuide} onClose={closeWelcomeGuide} />
       <KeyboardShortcutsModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
       <DownloadModal
           isOpen={showDownloadModal}
           onClose={() => setShowDownloadModal(false)}
@@ -1549,6 +1556,8 @@ ${clips}
             <button onClick={() => setShowProducerChat(!showProducerChat)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all duration-300 shadow-lg ${showProducerChat ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-transparent' : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white hover:border-white/20'}`}>
                 <Sparkles className="w-4 h-4" /><span className="text-xs font-bold hidden md:inline">Producer AI</span>
             </button>
+            <div className="h-6 w-px bg-white/10 mx-1" />
+            <UserMenu onSignInClick={() => setShowAuthModal(true)} />
         </div>
       </header>
 
@@ -1753,4 +1762,11 @@ ${clips}
   );
 };
 
-export default App;
+// Wrap App with AuthProvider
+const AppWithAuth: React.FC = () => (
+  <AuthProvider>
+    <App />
+  </AuthProvider>
+);
+
+export default AppWithAuth;
