@@ -201,8 +201,9 @@ const cleanDataUrl = (dataUrl: string): string => {
 // TIMEOUT UTILITY FOR API CALLS
 // ============================================
 
-const DEFAULT_TIMEOUT_MS = 60000; // 60 seconds default
-const LONG_TIMEOUT_MS = 180000;   // 3 minutes for video generation
+const DEFAULT_TIMEOUT_MS = 120000; // 2 minutes default (was 60s - too aggressive for complex prompts)
+const COMPLEX_TIMEOUT_MS = 180000; // 3 minutes for complex multi-reference generations
+const LONG_TIMEOUT_MS = 300000;    // 5 minutes for video generation
 
 class TimeoutError extends Error {
   constructor(message: string = 'Request timed out') {
@@ -210,6 +211,33 @@ class TimeoutError extends Error {
     this.name = 'TimeoutError';
   }
 }
+
+/**
+ * Calculate timeout based on prompt/reference complexity
+ */
+const calculateDynamicTimeout = (prompt: string, referenceCount: number): number => {
+  let complexityScore = 0;
+
+  // More references = more complex
+  complexityScore += referenceCount * 2;
+
+  // Longer prompt = more complex
+  complexityScore += Math.min(prompt.length / 200, 5);
+
+  // High-res keywords = more complex
+  if (prompt.toLowerCase().includes('4k') || prompt.toLowerCase().includes('high resolution')) {
+    complexityScore += 3;
+  }
+
+  // Multiple characters/entities = more complex
+  const entityMatches = prompt.match(/character|person|model|athlete|player/gi) || [];
+  complexityScore += entityMatches.length * 1.5;
+
+  // Select timeout based on complexity
+  if (complexityScore >= 8) return COMPLEX_TIMEOUT_MS;
+  if (complexityScore >= 4) return DEFAULT_TIMEOUT_MS;
+  return 90000; // 90s for simple prompts
+};
 
 /**
  * Wraps a promise with a timeout. If the promise doesn't resolve within
@@ -236,6 +264,52 @@ const withTimeout = async <T>(
     clearTimeout(timeoutId!);
     throw error;
   }
+};
+
+/**
+ * Retry wrapper with exponential backoff for transient API failures
+ * Handles: 503 Service Unavailable, timeouts, rate limits
+ */
+const withRetry = async <T>(
+  operation: () => Promise<T>,
+  operationName: string = 'API call',
+  maxRetries: number = 3,
+  baseDelayMs: number = 3000
+): Promise<T> => {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      const errorMessage = error?.message || '';
+
+      // Check if error is retryable
+      const isRetryable =
+        errorMessage.includes('503') ||
+        errorMessage.includes('overloaded') ||
+        errorMessage.includes('UNAVAILABLE') ||
+        errorMessage.includes('timed out') ||
+        errorMessage.includes('timeout') ||
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('429');
+
+      if (!isRetryable || attempt === maxRetries) {
+        // Not retryable or last attempt - throw
+        throw error;
+      }
+
+      // Calculate backoff with jitter
+      const backoffMs = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
+      console.log(`⚠️ ${operationName} failed (attempt ${attempt}/${maxRetries}): ${errorMessage.substring(0, 100)}`);
+      console.log(`   Retrying in ${(backoffMs / 1000).toFixed(1)}s...`);
+
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  throw lastError || new Error(`${operationName} failed after ${maxRetries} attempts`);
 };
 
 // Export the timeout error type for handling
@@ -566,16 +640,25 @@ export const generateImage = async (
       requestConfig.tools = [{ googleSearch: {} }];
   }
   
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
-      contents: {
-        parts: parts
-      },
-      config: requestConfig
-    }),
-    DEFAULT_TIMEOUT_MS,
-    'Image generation'
+  // Calculate dynamic timeout based on complexity
+  const dynamicTimeout = calculateDynamicTimeout(prompt, safeReferences.length);
+
+  // Wrap with retry logic for transient failures (503, rate limits, timeouts)
+  const response = await withRetry(
+    async () => withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-pro-image-preview',
+        contents: {
+          parts: parts
+        },
+        config: requestConfig
+      }),
+      dynamicTimeout,
+      'Image generation'
+    ),
+    'Image generation',
+    3, // max retries
+    3000 // base delay 3s
   );
 
   const candidates = response.candidates;
@@ -1612,13 +1695,26 @@ export const applyEdit = async (
       requestConfig.imageConfig.aspectRatio = aspectRatio;
   }
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-image-preview', 
-    contents: {
-      parts: parts
-    },
-    config: requestConfig
-  });
+  // Calculate dynamic timeout based on edit complexity
+  const dynamicTimeout = calculateDynamicTimeout(editInstruction, references.length + 1); // +1 for canvas
+
+  // Wrap with retry logic for transient failures
+  const response = await withRetry(
+    async () => withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3-pro-image-preview',
+        contents: {
+          parts: parts
+        },
+        config: requestConfig
+      }),
+      dynamicTimeout,
+      'Image edit'
+    ),
+    'Image edit',
+    3, // max retries
+    3000 // base delay 3s
+  );
 
   const contentParts = response.candidates?.[0]?.content?.parts;
   let base64Data = "";
