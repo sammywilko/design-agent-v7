@@ -788,7 +788,7 @@ const App: React.FC = () => {
 
           const result = await generateImage(prompt, references, {
               aspectRatio: finalAspectRatio as any,
-              resolution: '1024x1024'
+              resolution: '1K'
           });
           return result.url;
       } catch (error) {

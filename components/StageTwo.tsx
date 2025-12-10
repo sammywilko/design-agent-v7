@@ -771,7 +771,12 @@ CRITICAL REQUIREMENTS:
               );
               newImage.projectId = currentProject.id;
               setCurrentImage(newImage);
-              setHistory(prev => [...prev, newImage]);
+              setHistory(prev => [...prev, {
+                image: newImage,
+                editStack: currentEditStack,
+                timestamp: Date.now(),
+                label: 'Style Match'
+              }]);
               if (onImageEdited) onImageEdited(newImage);
               showNotification("Style Match Complete");
           } catch (e) {
@@ -804,7 +809,12 @@ CRITICAL REQUIREMENTS:
                   const newImg = await applyEdit(currentImage.url, prompt, references, undefined, '2K', currentImage.aspectRatio);
                   newImg.prompt = `${variant}`;
                   newImg.projectId = currentProject.id;
-                  setHistory(prev => [...prev, newImg]);
+                  setHistory(prev => [...prev, {
+                    image: newImg,
+                    editStack: [],
+                    timestamp: Date.now(),
+                    label: variant
+                  }]);
                   if (onImageEdited) onImageEdited(newImg);
               } catch (e) { console.error(e); }
           }
@@ -1545,7 +1555,9 @@ CRITICAL REQUIREMENTS:
                             {historyItem.label || (isOriginal ? 'Original' : `Edit #${editNum}`)}
                           </span>
                           {historyItem.isBranch && (
-                            <GitBranch className="w-3 h-3 text-amber-400" title="Branch point" />
+                            <span title="Branch point">
+                              <GitBranch className="w-3 h-3 text-amber-400" />
+                            </span>
                           )}
                           {historyItem.editStack.length > 0 && (
                             <span className="text-[9px] text-violet-400 bg-violet-500/20 px-1.5 py-0.5 rounded">

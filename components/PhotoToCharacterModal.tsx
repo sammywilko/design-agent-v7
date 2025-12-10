@@ -117,7 +117,7 @@ const PhotoToCharacterModal: React.FC<PhotoToCharacterModalProps> = ({
     const extractVisualVocabulary = async (characterImage: string): Promise<ReferenceVocabulary | null> => {
         try {
             setIsExtractingVocabulary(true);
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+            const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY;
             if (!apiKey) {
                 console.warn('No API key for vocabulary extraction');
                 return null;

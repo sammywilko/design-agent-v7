@@ -105,7 +105,7 @@ const SceneCoverageModal: React.FC<SceneCoverageModalProps> = ({
   // Build entity locks from Bible data with vocabulary enhancement
   const buildEntityLocks = (): EntityLock[] => {
     const locks: EntityLock[] = [];
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY;
     const refIntelligence = apiKey ? new ReferenceIntelligenceService(apiKey) : null;
 
     lockedCharacters.forEach(charId => {
@@ -611,7 +611,9 @@ const SceneCoverageModal: React.FC<SceneCoverageModalProps> = ({
                                 {lockedCharacters.includes(char.id) ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
                                 {char.name}
                                 {char.referenceVocabulary && (
-                                  <Scan className="w-3 h-3 text-purple-400" title={`Visual vocabulary: ${char.referenceVocabulary.confidenceScore}% confidence`} />
+                                  <span title={`Visual vocabulary: ${char.referenceVocabulary.confidenceScore}% confidence`}>
+                                    <Scan className="w-3 h-3 text-purple-400" />
+                                  </span>
                                 )}
                                 {isInBeat && <span className="text-[8px] opacity-60">(in scene)</span>}
                               </button>

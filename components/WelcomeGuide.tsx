@@ -430,9 +430,7 @@ const WelcomeGuide: React.FC<WelcomeGuideProps> = ({ isOpen, onClose }) => {
           <div className="absolute top-6 left-6 z-20 flex gap-2">
             <button
               onClick={() => setViewMode('hero')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                viewMode === 'hero' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white hover:bg-white/10'
-              }`}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-zinc-500 hover:text-white hover:bg-white/10"
             >
               Welcome
             </button>
