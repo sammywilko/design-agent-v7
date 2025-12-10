@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag } from 'lucide-react';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square } from 'lucide-react';
 import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
@@ -92,6 +92,9 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
   const galleryUploadRef = useRef<HTMLInputElement>(null);
   const loadImageRef = useRef<HTMLInputElement>(null);
 
+  // Cancellation system for long-running edits
+  const isCancelledRef = useRef(false);
+
   useEffect(() => {
     if (initialImage && (!currentImage || initialImage.id !== history[0]?.image.id)) {
         setCurrentImage(initialImage);
@@ -147,6 +150,13 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
           ctx?.clearRect(0, 0, canvas.width, canvas.height);
           setHasMask(false);
       }
+  };
+
+  // Cancel handler for stopping in-progress edits
+  const handleCancelEdit = () => {
+    isCancelledRef.current = true;
+    setIsEditing(false);
+    showNotification('Edit cancelled - in-flight request may still complete');
   };
 
   const getMaskDataUrl = (): string | undefined => {
@@ -347,6 +357,9 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
 
     if (!currentImage || (!textToUse.trim() && references.length === 0) || isEditing) return;
 
+    // Reset cancellation flag at start of new edit
+    isCancelledRef.current = false;
+
     // Inject @mentioned entity references
     const { refs: mentionRefs, context: mentionContext } = parseAndInjectMentions();
     if (mentionContext) {
@@ -423,6 +436,12 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
               currentImage.aspectRatio
           );
 
+          // Check if cancelled while waiting for API
+          if (isCancelledRef.current) {
+            showNotification('Edit cancelled');
+            return;
+          }
+
           showNotification(`✓ Edit #${newEditStack.length} applied to current canvas`);
         } else {
           // RE-APPLY ALL MODE: Combine all edits and apply to pristine original
@@ -443,6 +462,12 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
               pristineOriginal.aspectRatio
           );
 
+          // Check if cancelled while waiting for API
+          if (isCancelledRef.current) {
+            showNotification('Edit cancelled');
+            return;
+          }
+
           showNotification(`✓ Applied ${newEditStack.length} edit(s) to pristine original`);
         }
       } else {
@@ -455,6 +480,12 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
             overrideResolution,
             currentImage.aspectRatio
         );
+
+        // Check if cancelled while waiting for API
+        if (isCancelledRef.current) {
+          showNotification('Edit cancelled');
+          return;
+        }
 
         // If using mask, this becomes a new pristine original (branch point)
         if (maskData) {
@@ -1422,11 +1453,20 @@ CRITICAL REQUIREMENTS:
                   )}
                </div>
                <button
-                  onClick={() => handleEdit()}
-                  disabled={!currentImage || isEditing || (!instruction && references.length === 0)}
-                  className="bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600 px-8 py-4 rounded-2xl font-bold transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2"
+                  onClick={isEditing ? handleCancelEdit : () => handleEdit()}
+                  disabled={!currentImage || (!isEditing && !instruction && references.length === 0)}
+                  className={`px-8 py-4 rounded-2xl font-bold transition-all shadow-lg hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 ${
+                    isEditing
+                      ? 'bg-red-500 hover:bg-red-600 text-white'
+                      : 'bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600'
+                  }`}
                >
-                  {isEditing ? 'Rendering...' : (hasMask ? 'Edit Region' : 'Apply Edit')}
+                  {isEditing ? (
+                    <>
+                      <Square className="w-4 h-4 fill-current" />
+                      Cancel
+                    </>
+                  ) : (hasMask ? 'Edit Region' : 'Apply Edit')}
                </button>
              </div>
              
