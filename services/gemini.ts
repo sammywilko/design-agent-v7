@@ -839,25 +839,34 @@ export const generateImageBatch = async (
     onProgress?: (completed: number, total: number, lastResult: 'success' | 'failed') => void,
     concurrencyLimit: number = 3
 ): Promise<BatchGenerationResult> => {
+  // Defensive: ensure inputs are arrays
+  const safePrompts = Array.isArray(prompts) ? prompts : [];
+  const safeReferences = Array.isArray(references) ? references : [];
+
   const results: GeneratedImage[] = [];
   const failures: Array<{ prompt: string; error: string }> = [];
   let completed = 0;
+
+  // Early return if no prompts
+  if (safePrompts.length === 0) {
+    return { successful: [], failed: [], totalRequested: 0, successRate: 0 };
+  }
 
   // Process in batches to respect rate limits
   const processBatch = async (batchPrompts: string[]): Promise<void> => {
     const batchPromises = batchPrompts.map(async (prompt) => {
       try {
-        const img = await generateImage(prompt, references, config, useGrounding);
+        const img = await generateImage(prompt, safeReferences, config, useGrounding);
         results.push(img);
         completed++;
-        onProgress?.(completed, prompts.length, 'success');
+        onProgress?.(completed, safePrompts.length, 'success');
         return { success: true };
       } catch (error: any) {
         const errorMessage = error?.message || 'Unknown error';
         console.error(`Batch generation failed for prompt: ${prompt.substring(0, 50)}...`, errorMessage);
         failures.push({ prompt, error: errorMessage });
         completed++;
-        onProgress?.(completed, prompts.length, 'failed');
+        onProgress?.(completed, safePrompts.length, 'failed');
         return { success: false };
       }
     });
@@ -866,16 +875,16 @@ export const generateImageBatch = async (
   };
 
   // Split prompts into chunks based on concurrency limit
-  for (let i = 0; i < prompts.length; i += concurrencyLimit) {
-    const batch = prompts.slice(i, i + concurrencyLimit);
+  for (let i = 0; i < safePrompts.length; i += concurrencyLimit) {
+    const batch = safePrompts.slice(i, i + concurrencyLimit);
     await processBatch(batch);
   }
 
   return {
     successful: results,
     failed: failures,
-    totalRequested: prompts.length,
-    successRate: prompts.length > 0 ? (results.length / prompts.length) * 100 : 0
+    totalRequested: safePrompts.length,
+    successRate: safePrompts.length > 0 ? (results.length / safePrompts.length) * 100 : 0
   };
 };
 
@@ -1108,23 +1117,29 @@ export const generateCinematic9ShotSheet = async (
 
   let completed = 0;
 
+  // Defensive: ensure arrays are iterable
+  const safeEntityLocks = Array.isArray(entityLocks) ? entityLocks : [];
+  const safeReferences = Array.isArray(references) ? references : [];
+
   // Build entity DNA for prompt injection
-  const entityDNA = entityLocks.map(lock =>
-    `[${lock.type.toUpperCase()}: ${lock.name}] ${lock.promptSnippet}`
+  const entityDNA = safeEntityLocks.map(lock =>
+    `[${lock.type?.toUpperCase() || 'ENTITY'}: ${lock.name || 'Unknown'}] ${lock.promptSnippet || ''}`
   ).join('\n');
 
   // Combine all entity references with existing references
   const allReferences = [
-    ...references,
-    ...entityLocks.flatMap(lock =>
-      lock.referenceImages.map((img, idx) => ({
-        id: `${lock.name}-ref-${idx}`,
+    ...safeReferences,
+    ...safeEntityLocks.flatMap(lock => {
+      // Defensive: ensure referenceImages is an array
+      const safeRefImages = Array.isArray(lock.referenceImages) ? lock.referenceImages : [];
+      return safeRefImages.map((img, idx) => ({
+        id: `${lock.name || 'entity'}-ref-${idx}`,
         data: img,
         type: lock.type === 'character' ? 'Character' as const :
               lock.type === 'location' ? 'Location' as const : 'Product' as const,
-        name: lock.name
-      }))
-    )
+        name: lock.name || 'Entity'
+      }));
+    })
   ];
 
   // Process in batches of 3 for rate limiting
