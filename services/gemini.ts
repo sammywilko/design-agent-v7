@@ -166,6 +166,33 @@ YOUR DUAL ROLE:
 Tone: Professional, Encouraging, Concise, and Expert.
 `;
 
+// ============================================
+// API KEY MANAGEMENT WITH FAILOVER
+// ============================================
+
+// API key validation errors
+class ApiKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApiKeyError';
+  }
+}
+
+// Validate API key format (Gemini keys start with 'AIza')
+const isValidApiKeyFormat = (key: string | undefined): key is string => {
+  return typeof key === 'string' && key.length > 20 && key.startsWith('AIza');
+};
+
+// Get primary and fallback API keys
+const getApiKeys = (): { primary: string | undefined; fallback: string | undefined } => {
+  const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
+  return {
+    primary: env.VITE_GEMINI_API_KEY,
+    fallback: env.VITE_GEMINI_API_KEY_FALLBACK
+  };
+};
+
+// Check for AI Studio environment (development)
 const checkApiKey = async (): Promise<void> => {
   const win = window as any;
   if (win.aistudio) {
@@ -176,17 +203,80 @@ const checkApiKey = async (): Promise<void> => {
   }
 };
 
-// Cache the client instance to avoid recreating on every call
+// Cache the client instances
 let cachedClient: GoogleGenAI | null = null;
+let cachedFallbackClient: GoogleGenAI | null = null;
+let usingFallback = false;
 
+/**
+ * Get the Gemini client with proper error handling and failover
+ * - Validates API key format
+ * - Falls back to secondary key if primary fails
+ * - Provides clear error messages
+ */
 const getClient = async (): Promise<GoogleGenAI> => {
-  if (cachedClient) return cachedClient;
+  // Return cached client if available
+  if (cachedClient && !usingFallback) return cachedClient;
+  if (cachedFallbackClient && usingFallback) return cachedFallbackClient;
 
+  // Check AI Studio environment first
   await checkApiKey();
-  const apiKey = (import.meta as unknown as { env: { VITE_GEMINI_API_KEY?: string } }).env.VITE_GEMINI_API_KEY || '';
-  cachedClient = new GoogleGenAI({ apiKey });
-  return cachedClient;
+
+  const { primary, fallback } = getApiKeys();
+
+  // Validate primary key
+  if (isValidApiKeyFormat(primary)) {
+    cachedClient = new GoogleGenAI({ apiKey: primary });
+    return cachedClient;
+  }
+
+  // Try fallback if primary invalid
+  if (isValidApiKeyFormat(fallback)) {
+    console.warn('⚠️ Primary API key missing/invalid, using fallback key');
+    usingFallback = true;
+    cachedFallbackClient = new GoogleGenAI({ apiKey: fallback });
+    return cachedFallbackClient;
+  }
+
+  // No valid keys - throw clear error
+  throw new ApiKeyError(
+    'Gemini API key not configured.\n\n' +
+    'To fix this:\n' +
+    '1. Get an API key from https://aistudio.google.com/apikey\n' +
+    '2. Create a .env file in the project root\n' +
+    '3. Add: VITE_GEMINI_API_KEY=your_api_key_here\n' +
+    '4. Restart the development server'
+  );
 };
+
+/**
+ * Switch to fallback API key (called when primary key fails with auth/quota errors)
+ */
+const switchToFallbackKey = (): boolean => {
+  const { fallback } = getApiKeys();
+
+  if (isValidApiKeyFormat(fallback) && !usingFallback) {
+    console.log('🔄 Switching to fallback API key...');
+    usingFallback = true;
+    cachedFallbackClient = new GoogleGenAI({ apiKey: fallback });
+    cachedClient = null; // Clear primary client
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Reset to primary API key
+ */
+const resetToPrimaryKey = (): void => {
+  usingFallback = false;
+  cachedClient = null;
+  cachedFallbackClient = null;
+};
+
+// Export for external use
+export { ApiKeyError, switchToFallbackKey, resetToPrimaryKey };
 
 const getMimeType = (dataUrl: string): string => {
   const match = dataUrl.match(/^data:([^;]+);base64,/);
@@ -269,6 +359,7 @@ const withTimeout = async <T>(
 /**
  * Retry wrapper with exponential backoff for transient API failures
  * Handles: 503 Service Unavailable, timeouts, rate limits
+ * Auto-switches to fallback API key on quota/auth errors
  */
 const withRetry = async <T>(
   operation: () => Promise<T>,
@@ -277,6 +368,7 @@ const withRetry = async <T>(
   baseDelayMs: number = 3000
 ): Promise<T> => {
   let lastError: Error | null = null;
+  let triedFallback = false;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -284,6 +376,26 @@ const withRetry = async <T>(
     } catch (error: any) {
       lastError = error;
       const errorMessage = error?.message || '';
+
+      // Check if error suggests API key/quota issue - try fallback key
+      const isQuotaOrAuthError =
+        errorMessage.includes('quota') ||
+        errorMessage.includes('QUOTA') ||
+        errorMessage.includes('403') ||
+        errorMessage.includes('PERMISSION_DENIED') ||
+        errorMessage.includes('API_KEY_INVALID') ||
+        errorMessage.includes('authentication');
+
+      if (isQuotaOrAuthError && !triedFallback) {
+        // Try switching to fallback API key
+        if (switchToFallbackKey()) {
+          console.log(`🔄 ${operationName}: Switched to fallback API key, retrying...`);
+          triedFallback = true;
+          // Don't count this as a retry attempt
+          attempt--;
+          continue;
+        }
+      }
 
       // Check if error is retryable
       const isRetryable =
