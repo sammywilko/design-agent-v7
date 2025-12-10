@@ -1,6 +1,6 @@
 /**
  * Firebase Configuration and Initialization
- * Supports real-time collaboration with Firestore
+ * Supports real-time collaboration, authentication, and cloud storage
  */
 
 import { initializeApp, FirebaseApp } from 'firebase/app';
@@ -11,21 +11,41 @@ import {
     doc,
     setDoc,
     getDoc,
+    getDocs,
     updateDoc,
+    deleteDoc,
     onSnapshot,
     serverTimestamp,
     Timestamp,
     DocumentReference,
-    Unsubscribe
+    Unsubscribe,
+    query,
+    where,
+    orderBy
 } from 'firebase/firestore';
 import {
     getStorage,
     FirebaseStorage,
     ref,
     uploadString,
-    getDownloadURL
+    getDownloadURL,
+    deleteObject
 } from 'firebase/storage';
-import { ScriptData, MoodBoard, GeneratedImage } from '../types';
+import {
+    getAuth,
+    Auth,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signInWithPopup,
+    GoogleAuthProvider,
+    signOut as firebaseSignOut,
+    onAuthStateChanged,
+    User,
+    UserCredential,
+    sendPasswordResetEmail,
+    updateProfile
+} from 'firebase/auth';
+import { ScriptData, MoodBoard, GeneratedImage, Project } from '../types';
 
 // Firebase configuration - uses Vite env vars
 const firebaseConfig = {
@@ -41,6 +61,8 @@ const firebaseConfig = {
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
+let auth: Auth | null = null;
+const googleProvider = new GoogleAuthProvider();
 
 /**
  * Check if Firebase is configured
@@ -56,7 +78,7 @@ export const isFirebaseConfigured = (): boolean => {
 /**
  * Initialize Firebase (lazy initialization)
  */
-export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: FirebaseStorage } | null => {
+export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: FirebaseStorage; auth: Auth } | null => {
     if (!isFirebaseConfigured()) {
         console.warn('Firebase not configured - collaboration features disabled');
         return null;
@@ -67,6 +89,7 @@ export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: Fire
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             storage = getStorage(app);
+            auth = getAuth(app);
             console.log('Firebase initialized successfully');
         } catch (error) {
             console.error('Firebase initialization failed:', error);
@@ -74,7 +97,7 @@ export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: Fire
         }
     }
 
-    return { app, db: db!, storage: storage! };
+    return { app, db: db!, storage: storage!, auth: auth! };
 };
 
 /**
@@ -378,4 +401,448 @@ export const uploadImages = async (
     return results;
 };
 
+// ============================================
+// AUTHENTICATION FUNCTIONS
+// ============================================
+
+/**
+ * Get Auth instance
+ */
+export const getAuthInstance = (): Auth | null => {
+    if (!auth) initFirebase();
+    return auth;
+};
+
+/**
+ * Get current user
+ */
+export const getCurrentUser = (): User | null => {
+    const authInstance = getAuthInstance();
+    return authInstance?.currentUser || null;
+};
+
+/**
+ * Sign up with email and password
+ */
+export const signUpWithEmail = async (
+    email: string,
+    password: string,
+    displayName?: string
+): Promise<UserCredential> => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) throw new Error('Firebase not configured');
+
+    const credential = await createUserWithEmailAndPassword(authInstance, email, password);
+
+    // Update display name if provided
+    if (displayName && credential.user) {
+        await updateProfile(credential.user, { displayName });
+    }
+
+    // Create user document in Firestore
+    await createUserDocument(credential.user);
+
+    return credential;
+};
+
+/**
+ * Sign in with email and password
+ */
+export const signInWithEmail = async (
+    email: string,
+    password: string
+): Promise<UserCredential> => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) throw new Error('Firebase not configured');
+
+    return signInWithEmailAndPassword(authInstance, email, password);
+};
+
+/**
+ * Sign in with Google
+ */
+export const signInWithGoogle = async (): Promise<UserCredential> => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) throw new Error('Firebase not configured');
+
+    const credential = await signInWithPopup(authInstance, googleProvider);
+
+    // Create/update user document
+    await createUserDocument(credential.user);
+
+    return credential;
+};
+
+/**
+ * Sign out
+ */
+export const signOut = async (): Promise<void> => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) return;
+
+    await firebaseSignOut(authInstance);
+};
+
+/**
+ * Send password reset email
+ */
+export const resetPassword = async (email: string): Promise<void> => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) throw new Error('Firebase not configured');
+
+    await sendPasswordResetEmail(authInstance, email);
+};
+
+/**
+ * Subscribe to auth state changes
+ */
+export const subscribeToAuthState = (
+    callback: (user: User | null) => void
+): Unsubscribe | null => {
+    const authInstance = getAuthInstance();
+    if (!authInstance) return null;
+
+    return onAuthStateChanged(authInstance, callback);
+};
+
+// ============================================
+// USER DOCUMENT FUNCTIONS
+// ============================================
+
+export interface UserDocument {
+    uid: string;
+    email: string | null;
+    displayName: string | null;
+    photoURL: string | null;
+    createdAt: Timestamp;
+    lastLoginAt: Timestamp;
+    projectCount: number;
+    storageUsed: number; // bytes
+}
+
+/**
+ * Create or update user document in Firestore
+ */
+const createUserDocument = async (user: User): Promise<void> => {
+    const firestore = getDb();
+    if (!firestore) return;
+
+    const userRef = doc(firestore, 'users', user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+        // Create new user document
+        await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            createdAt: serverTimestamp(),
+            lastLoginAt: serverTimestamp(),
+            projectCount: 0,
+            storageUsed: 0
+        });
+    } else {
+        // Update last login
+        await updateDoc(userRef, {
+            lastLoginAt: serverTimestamp(),
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL
+        });
+    }
+};
+
+/**
+ * Get user document
+ */
+export const getUserDocument = async (uid: string): Promise<UserDocument | null> => {
+    const firestore = getDb();
+    if (!firestore) return null;
+
+    try {
+        const userRef = doc(firestore, 'users', uid);
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) return null;
+
+        return userSnap.data() as UserDocument;
+    } catch (error) {
+        console.error('Failed to get user document:', error);
+        return null;
+    }
+};
+
+// ============================================
+// USER-OWNED PROJECT FUNCTIONS
+// ============================================
+
+export interface CloudProject {
+    id: string;
+    ownerId: string;
+    name: string;
+    description?: string;
+    thumbnail?: string;
+    createdAt: Timestamp;
+    updatedAt: Timestamp;
+    lastOpenedAt?: Timestamp;
+    // Project data (JSON strings for simplicity)
+    scriptData?: string;
+    moodBoards?: string;
+    globalHistory?: string;
+    // Sharing
+    isPublic: boolean;
+    sharedWith: string[]; // Array of user IDs
+    shareCode?: string; // For link sharing
+    // Stats
+    imageCount: number;
+    beatCount: number;
+}
+
+/**
+ * Create a new cloud project for user
+ */
+export const createCloudProject = async (
+    userId: string,
+    name: string,
+    description?: string
+): Promise<string | null> => {
+    const firestore = getDb();
+    if (!firestore) return null;
+
+    try {
+        const projectId = generateProjectId();
+        const projectRef = doc(firestore, 'userProjects', projectId);
+
+        await setDoc(projectRef, {
+            id: projectId,
+            ownerId: userId,
+            name,
+            description: description || '',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            isPublic: false,
+            sharedWith: [],
+            imageCount: 0,
+            beatCount: 0
+        });
+
+        // Increment user's project count
+        const userRef = doc(firestore, 'users', userId);
+        await updateDoc(userRef, {
+            projectCount: (await getDoc(userRef)).data()?.projectCount + 1 || 1
+        });
+
+        return projectId;
+    } catch (error) {
+        console.error('Failed to create cloud project:', error);
+        return null;
+    }
+};
+
+/**
+ * Get all projects for a user
+ */
+export const getUserProjects = async (userId: string): Promise<CloudProject[]> => {
+    const firestore = getDb();
+    if (!firestore) return [];
+
+    try {
+        const projectsRef = collection(firestore, 'userProjects');
+        const q = query(
+            projectsRef,
+            where('ownerId', '==', userId),
+            orderBy('updatedAt', 'desc')
+        );
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => doc.data() as CloudProject);
+    } catch (error) {
+        console.error('Failed to get user projects:', error);
+        return [];
+    }
+};
+
+/**
+ * Get a single cloud project
+ */
+export const getCloudProject = async (projectId: string): Promise<CloudProject | null> => {
+    const firestore = getDb();
+    if (!firestore) return null;
+
+    try {
+        const projectRef = doc(firestore, 'userProjects', projectId);
+        const projectSnap = await getDoc(projectRef);
+
+        if (!projectSnap.exists()) return null;
+
+        return projectSnap.data() as CloudProject;
+    } catch (error) {
+        console.error('Failed to get cloud project:', error);
+        return null;
+    }
+};
+
+/**
+ * Update a cloud project
+ */
+export const updateCloudProject = async (
+    projectId: string,
+    updates: Partial<Omit<CloudProject, 'id' | 'ownerId' | 'createdAt'>>
+): Promise<boolean> => {
+    const firestore = getDb();
+    if (!firestore) return false;
+
+    try {
+        const projectRef = doc(firestore, 'userProjects', projectId);
+
+        await updateDoc(projectRef, {
+            ...updates,
+            updatedAt: serverTimestamp()
+        });
+
+        return true;
+    } catch (error) {
+        console.error('Failed to update cloud project:', error);
+        return false;
+    }
+};
+
+/**
+ * Save project data (scriptData, moodBoards, globalHistory)
+ */
+export const saveProjectData = async (
+    projectId: string,
+    data: {
+        scriptData?: ScriptData;
+        moodBoards?: MoodBoard[];
+        globalHistory?: GeneratedImage[];
+    }
+): Promise<boolean> => {
+    const firestore = getDb();
+    if (!firestore) return false;
+
+    try {
+        const projectRef = doc(firestore, 'userProjects', projectId);
+
+        const updateData: Record<string, any> = {
+            updatedAt: serverTimestamp()
+        };
+
+        if (data.scriptData !== undefined) {
+            updateData.scriptData = JSON.stringify(data.scriptData);
+            updateData.beatCount = data.scriptData?.beats?.length || 0;
+        }
+        if (data.moodBoards !== undefined) {
+            updateData.moodBoards = JSON.stringify(data.moodBoards);
+        }
+        if (data.globalHistory !== undefined) {
+            updateData.globalHistory = JSON.stringify(data.globalHistory);
+            updateData.imageCount = data.globalHistory.length;
+        }
+
+        await updateDoc(projectRef, updateData);
+        return true;
+    } catch (error) {
+        console.error('Failed to save project data:', error);
+        return false;
+    }
+};
+
+/**
+ * Load project data
+ */
+export const loadProjectData = async (projectId: string): Promise<{
+    scriptData: ScriptData | null;
+    moodBoards: MoodBoard[];
+    globalHistory: GeneratedImage[];
+} | null> => {
+    const project = await getCloudProject(projectId);
+    if (!project) return null;
+
+    return {
+        scriptData: project.scriptData ? JSON.parse(project.scriptData) : null,
+        moodBoards: project.moodBoards ? JSON.parse(project.moodBoards) : [],
+        globalHistory: project.globalHistory ? JSON.parse(project.globalHistory) : []
+    };
+};
+
+/**
+ * Delete a cloud project
+ */
+export const deleteCloudProject = async (projectId: string, userId: string): Promise<boolean> => {
+    const firestore = getDb();
+    if (!firestore) return false;
+
+    try {
+        // Verify ownership
+        const project = await getCloudProject(projectId);
+        if (!project || project.ownerId !== userId) {
+            console.error('Not authorized to delete this project');
+            return false;
+        }
+
+        const projectRef = doc(firestore, 'userProjects', projectId);
+        await deleteDoc(projectRef);
+
+        // Decrement user's project count
+        const userRef = doc(firestore, 'users', userId);
+        const userDoc = await getDoc(userRef);
+        const currentCount = userDoc.data()?.projectCount || 1;
+        await updateDoc(userRef, {
+            projectCount: Math.max(0, currentCount - 1)
+        });
+
+        return true;
+    } catch (error) {
+        console.error('Failed to delete cloud project:', error);
+        return false;
+    }
+};
+
+/**
+ * Generate a share code for a project
+ */
+export const generateShareCode = async (projectId: string): Promise<string | null> => {
+    const firestore = getDb();
+    if (!firestore) return null;
+
+    try {
+        const shareCode = generateProjectId(); // 8-char code
+        const projectRef = doc(firestore, 'userProjects', projectId);
+
+        await updateDoc(projectRef, {
+            shareCode,
+            updatedAt: serverTimestamp()
+        });
+
+        return shareCode;
+    } catch (error) {
+        console.error('Failed to generate share code:', error);
+        return null;
+    }
+};
+
+/**
+ * Find project by share code
+ */
+export const findProjectByShareCode = async (shareCode: string): Promise<CloudProject | null> => {
+    const firestore = getDb();
+    if (!firestore) return null;
+
+    try {
+        const projectsRef = collection(firestore, 'userProjects');
+        const q = query(projectsRef, where('shareCode', '==', shareCode));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) return null;
+
+        return snapshot.docs[0].data() as CloudProject;
+    } catch (error) {
+        console.error('Failed to find project by share code:', error);
+        return null;
+    }
+};
+
 export { Timestamp };
+export type { User };
