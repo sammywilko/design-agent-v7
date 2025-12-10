@@ -49,6 +49,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
   }] : []);
   const [instruction, setInstruction] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [editingPhase, setEditingPhase] = useState<string>(''); // Detailed loading phase
   const [references, setReferences] = useState<ReferenceAsset[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
@@ -399,6 +400,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
     const allReferences = [...references, ...mentionRefs, ...styleRefs].slice(0, MAX_REFERENCES);
 
     setIsEditing(true);
+    setEditingPhase('Preparing edit...');
     const maskData = getMaskDataUrl();
 
     try {
@@ -426,6 +428,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
           // CHAINED EDITS MODE: Apply new edit to CURRENT canvas state
           // This ensures each edit builds on the previous result
           console.log(`🔗 Chained edit: Applying edit #${newEditStack.length} to CURRENT canvas state`);
+          setEditingPhase(`Applying edit #${newEditStack.length}...`);
 
           newImage = await applyEdit(
               currentImage.url,  // ✅ Use CURRENT canvas, not pristine
@@ -447,6 +450,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
           // RE-APPLY ALL MODE: Combine all edits and apply to pristine original
           // Useful for "final render" or when edits drift too far from intent
           console.log(`🔄 Re-apply all: Combining ${newEditStack.length} edits on PRISTINE original`);
+          setEditingPhase(`Re-applying ${newEditStack.length} edits from pristine...`);
 
           const allInstructions = newEditStack.map(e => e.instruction);
           const combinedInstruction = allInstructions.length === 1
@@ -472,6 +476,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
         }
       } else {
         // DESTRUCTIVE MODE: Apply to current image (legacy behavior, or when using mask)
+        setEditingPhase(maskData ? 'Applying masked edit...' : 'Applying edit...');
         newImage = await applyEdit(
             currentImage.url,
             textToUse,
@@ -523,6 +528,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
       showNotification("Editing failed. Please try again.");
     } finally {
       setIsEditing(false);
+      setEditingPhase('');
     }
   };
 
@@ -1478,6 +1484,15 @@ CRITICAL REQUIREMENTS:
                     </>
                   ) : (hasMask ? 'Edit Region' : 'Apply Edit')}
                </button>
+               {/* Loading phase indicator */}
+               {isEditing && editingPhase && (
+                 <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap">
+                   <span className="text-xs text-violet-400 bg-violet-500/20 px-3 py-1 rounded-full flex items-center gap-2">
+                     <Loader2 className="w-3 h-3 animate-spin" />
+                     {editingPhase}
+                   </span>
+                 </div>
+               )}
              </div>
              
              <div className="h-10 w-px bg-white/10 mx-2" />
