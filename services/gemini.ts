@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type, Schema, Part } from "@google/genai";
 import { DirectorResponse, GeneratedImage, GenerationConfig, ReferenceAsset, GeneratedVideo, Beat, CharacterProfile, CoverageAnalysis, Lookbook, ToolMode, ReferenceBundle, QualityScore, MoodBoard, LocationProfile, ProductProfile, VariantType, ProductionDesign, StyleDNA, ProjectDefaultStyle, CharacterSpecs as CharacterSpecsType } from "../types";
+import { sanitizePrompt, validatePrompt, validateImageDataUrl, validateReferenceCount } from "./validation";
 
 const NANO_BANANA_GUIDE = `
 NANO BANANA PRO (GEMINI 3 PRO IMAGE) MASTER GUIDE:
@@ -708,13 +709,24 @@ export const generateImage = async (
     config: GenerationConfig,
     useGrounding: boolean = false
 ): Promise<GeneratedImage> => {
+  // Validate and sanitize input
+  const sanitizedPrompt = sanitizePrompt(prompt);
+  const promptValidation = validatePrompt(sanitizedPrompt);
+  if (!promptValidation.valid) {
+    throw new Error(`Invalid prompt: ${promptValidation.error}`);
+  }
+
+  // Validate reference count
+  const safeReferences = Array.isArray(references) ? references : [];
+  const refCountValidation = validateReferenceCount(safeReferences.length, 14);
+  if (!refCountValidation.valid) {
+    throw new Error(refCountValidation.error);
+  }
+
   const ai = await getClient();
 
   const parts: any[] = [];
-  let explicitPrompt = prompt;
-
-  // Ensure references is always a safe array
-  const safeReferences = Array.isArray(references) ? references : [];
+  let explicitPrompt = sanitizedPrompt;
 
   if (safeReferences.length > 0) {
       explicitPrompt += "\n\nREFERENCES:";
@@ -1742,20 +1754,32 @@ export const generateBeatVariants = async (
  * Stage 2: Editing Logic
  */
 export const applyEdit = async (
-  originalImage: string, 
+  originalImage: string,
   editInstruction: string,
   references: ReferenceAsset[] = [],
   maskImage?: string,
   outputResolution: string = "2K",
   aspectRatio: string = "1:1"
 ): Promise<GeneratedImage> => {
+  // Validate inputs
+  const sanitizedInstruction = sanitizePrompt(editInstruction);
+  const instructionValidation = validatePrompt(sanitizedInstruction);
+  if (!instructionValidation.valid) {
+    throw new Error(`Invalid edit instruction: ${instructionValidation.error}`);
+  }
+
+  const imageValidation = validateImageDataUrl(originalImage);
+  if (!imageValidation.valid) {
+    throw new Error(`Invalid image: ${imageValidation.error}`);
+  }
+
   const ai = await getClient();
   const cleanBase64Canvas = cleanDataUrl(originalImage);
   const mimeTypeCanvas = getMimeType(originalImage);
 
   const parts: any[] = [];
 
-  let finalInstruction = `(System: ${SYSTEM_INSTRUCTION_STAGE_2}) \nUser Instruction: ${editInstruction}`;
+  let finalInstruction = `(System: ${SYSTEM_INSTRUCTION_STAGE_2}) \nUser Instruction: ${sanitizedInstruction}`;
   finalInstruction += `\n\nNote: The first image provided is the 'Canvas' to be edited.`;
 
   if (maskImage) {
