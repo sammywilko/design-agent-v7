@@ -17,13 +17,14 @@ import DownloadModal from './components/DownloadModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import AuthModal from './components/AuthModal';
 import UserMenu from './components/UserMenu';
-import { AuthProvider } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage, ReferenceAsset, ReferenceType } from './types';
 import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2, Keyboard } from 'lucide-react';
 import { db } from './services/db';
+import * as storage from './services/storage';
 import { generateCharacterSheet, generateExpressionBank, generateImage } from './services/gemini';
 import { generateThumbnail } from './services/imageUtils';
 import { analyzeImage, extractStyleDNA, ensureThumbnail } from './services/moodBoardService';
@@ -43,6 +44,9 @@ interface ToastMsg {
 }
 
 const App: React.FC = () => {
+  // Auth state
+  const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
@@ -115,11 +119,20 @@ const App: React.FC = () => {
     onShowHelp: useCallback(() => setShowShortcutsModal(true), []),
   });
 
+  // Load projects when auth state changes
   useEffect(() => {
+    // Wait for auth to finish loading
+    if (isAuthLoading) return;
+
     const loadProjects = async () => {
+        setIsLoadingProjects(true);
         try {
-            const loaded = await db.getProjects();
+            // Use hybrid storage - loads from Firestore if authenticated, IndexedDB if not
+            const loaded = await storage.getProjects();
             setProjects(loaded.sort((a, b) => b.createdAt - a.createdAt));
+
+            // Clear current project when auth state changes
+            setCurrentProject(null);
         } catch (e) {
             console.error("Failed to load projects", e);
         } finally {
@@ -127,7 +140,7 @@ const App: React.FC = () => {
         }
     };
     loadProjects();
-  }, []);
+  }, [isAuthLoading, isAuthenticated, user?.uid]);
 
   useEffect(() => {
     if (currentProject) {
@@ -187,15 +200,16 @@ const App: React.FC = () => {
   };
 
   const createProject = async (name: string) => {
-    const newProject: Project = { id: crypto.randomUUID(), name, createdAt: Date.now() };
-    await db.saveProject(newProject);
+    // Use hybrid storage - saves to Firestore if authenticated, IndexedDB if not
+    const newProject = await storage.createProject(name);
     setProjects(prev => [newProject, ...prev]);
     setCurrentProject(newProject);
   };
 
   const deleteProject = async (id: string) => {
     if (confirm("Are you sure? This will delete all assets and history for this project.")) {
-        await db.deleteProject(id);
+        // Use hybrid storage - deletes from both Firestore and IndexedDB
+        await storage.deleteProject(id);
         setProjects(prev => prev.filter(p => p.id !== id));
         if (currentProject?.id === id) setCurrentProject(null);
     }
