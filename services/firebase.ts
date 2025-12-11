@@ -21,7 +21,9 @@ import {
     Unsubscribe,
     query,
     where,
-    orderBy
+    orderBy,
+    enableNetwork,
+    disableNetwork
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -91,6 +93,14 @@ export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: Fire
             storage = getStorage(app);
             auth = getAuth(app);
             console.log('Firebase initialized successfully');
+
+            // Force enable network to fix "client is offline" issues
+            // This is needed because Firestore's persistence can get stuck in offline mode
+            enableNetwork(db).then(() => {
+                console.log('Firestore network enabled');
+            }).catch((err) => {
+                console.warn('Could not enable Firestore network:', err);
+            });
         } catch (error) {
             console.error('Firebase initialization failed:', error);
             return null;
