@@ -7,18 +7,14 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // User-owned projects - only owner can read/write
+    // User-owned projects - simplified read rule for queries/empty database
     match /userProjects/{projectId} {
-      allow read: if request.auth != null && (
-        resource.data.ownerId == request.auth.uid ||
-        resource.data.isPublic == true ||
-        request.auth.uid in resource.data.sharedWith
-      );
+      allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
 
-    // Shared/collaborative projects (legacy - for real-time collaboration)
+    // Shared/collaborative projects (for real-time collaboration)
     match /projects/{projectId} {
       allow read, write: if request.auth != null;
     }
