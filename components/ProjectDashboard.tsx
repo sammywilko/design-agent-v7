@@ -50,9 +50,9 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
                 <div className="text-xs text-slate-500">Loading...</div>
               ) : isAuthenticated && user ? (
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                    <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-xs text-emerald-400">Cloud Sync</span>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                    <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-xs text-amber-400">Local Mode</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {user.photoURL ? (
