@@ -1,6 +1,7 @@
 /**
  * Hybrid Storage Service
  * Routes storage operations to Firestore (authenticated) or IndexedDB (anonymous)
+ * Includes timeouts to prevent hanging when Firestore is unavailable
  */
 
 import { db as indexedDB } from './db';
@@ -17,6 +18,24 @@ import {
 } from './firebase';
 import { Project, ScriptData, MoodBoard, GeneratedImage, SavedEntity } from '../types';
 
+// Timeout for Firestore operations (3 seconds)
+const FIRESTORE_TIMEOUT = 3000;
+
+/**
+ * Wrap a promise with a timeout
+ */
+const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    return Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+            setTimeout(() => {
+                console.warn(`Firestore operation timed out after ${ms}ms, using fallback`);
+                resolve(fallback);
+            }, ms);
+        })
+    ]);
+};
+
 /**
  * Check if user is authenticated
  */
@@ -31,17 +50,27 @@ export const getProjects = async (): Promise<Project[]> => {
     const user = getCurrentUser();
 
     if (user) {
-        // Load from Firestore
+        // Try to load from Firestore with timeout
         try {
-            const cloudProjects = await getUserProjects(user.uid);
-            return cloudProjects.map(cp => ({
-                id: cp.id,
-                name: cp.name,
-                createdAt: cp.createdAt?.toMillis?.() || Date.now()
-            }));
+            const cloudProjects = await withTimeout(
+                getUserProjects(user.uid),
+                FIRESTORE_TIMEOUT,
+                [] as CloudProject[]
+            );
+
+            if (cloudProjects.length > 0) {
+                return cloudProjects.map(cp => ({
+                    id: cp.id,
+                    name: cp.name,
+                    createdAt: cp.createdAt?.toMillis?.() || Date.now()
+                }));
+            }
+
+            // No cloud projects found - fallback to local
+            console.log('No cloud projects found, falling back to IndexedDB');
+            return indexedDB.getProjects();
         } catch (error) {
             console.error('Failed to load projects from Firestore:', error);
-            // Fallback to IndexedDB
             return indexedDB.getProjects();
         }
     }
@@ -56,24 +85,34 @@ export const getProjects = async (): Promise<Project[]> => {
 export const saveProject = async (project: Project): Promise<void> => {
     const user = getCurrentUser();
 
+    // Always save locally first
+    await indexedDB.saveProject(project);
+
     if (user) {
-        // Save to Firestore
+        // Try to save to Firestore (non-blocking)
         try {
-            const existing = await getCloudProject(project.id);
+            const existing = await withTimeout(
+                getCloudProject(project.id),
+                FIRESTORE_TIMEOUT,
+                null
+            );
+
             if (existing) {
-                await updateCloudProject(project.id, { name: project.name });
+                await withTimeout(
+                    updateCloudProject(project.id, { name: project.name }),
+                    FIRESTORE_TIMEOUT,
+                    false
+                );
             } else {
-                // Create new project in Firestore with the same ID
-                await firebaseCreateProject(user.uid, project.name);
+                await withTimeout(
+                    firebaseCreateProject(user.uid, project.name),
+                    FIRESTORE_TIMEOUT,
+                    null
+                );
             }
         } catch (error) {
             console.error('Failed to save project to Firestore:', error);
-            // Fallback to IndexedDB
-            await indexedDB.saveProject(project);
         }
-    } else {
-        // Not authenticated - use IndexedDB
-        await indexedDB.saveProject(project);
     }
 };
 
@@ -84,25 +123,36 @@ export const createProject = async (name: string): Promise<Project> => {
     const user = getCurrentUser();
     const projectId = crypto.randomUUID();
 
+    // Always create locally first for instant response
+    const newProject: Project = { id: projectId, name, createdAt: Date.now() };
+    await indexedDB.saveProject(newProject);
+
     if (user) {
-        // Create in Firestore
+        // Try to create in Firestore (non-blocking, use local ID if fails)
         try {
-            const cloudProjectId = await firebaseCreateProject(user.uid, name);
+            const cloudProjectId = await withTimeout(
+                firebaseCreateProject(user.uid, name),
+                FIRESTORE_TIMEOUT,
+                null
+            );
+
             if (cloudProjectId) {
-                return {
+                // Update with cloud ID
+                const cloudProject: Project = {
                     id: cloudProjectId,
                     name,
                     createdAt: Date.now()
                 };
+                // Delete local and save with cloud ID
+                await indexedDB.deleteProject(projectId);
+                await indexedDB.saveProject(cloudProject);
+                return cloudProject;
             }
         } catch (error) {
             console.error('Failed to create project in Firestore:', error);
         }
     }
 
-    // Fallback to IndexedDB
-    const newProject: Project = { id: projectId, name, createdAt: Date.now() };
-    await indexedDB.saveProject(newProject);
     return newProject;
 };
 
@@ -112,17 +162,21 @@ export const createProject = async (name: string): Promise<Project> => {
 export const deleteProject = async (projectId: string): Promise<void> => {
     const user = getCurrentUser();
 
+    // Always delete from IndexedDB first for instant response
+    await indexedDB.deleteProject(projectId);
+
     if (user) {
-        // Delete from Firestore
+        // Try to delete from Firestore (non-blocking)
         try {
-            await firebaseDeleteProject(projectId, user.uid);
+            await withTimeout(
+                firebaseDeleteProject(projectId, user.uid),
+                FIRESTORE_TIMEOUT,
+                false
+            );
         } catch (error) {
             console.error('Failed to delete project from Firestore:', error);
         }
     }
-
-    // Always delete from IndexedDB too (in case there's local data)
-    await indexedDB.deleteProject(projectId);
 };
 
 /**
@@ -136,18 +190,7 @@ export const saveProjectData = async (
         globalHistory?: GeneratedImage[];
     }
 ): Promise<void> => {
-    const user = getCurrentUser();
-
-    if (user) {
-        // Save to Firestore
-        try {
-            await firebaseSaveProjectData(projectId, data);
-        } catch (error) {
-            console.error('Failed to save project data to Firestore:', error);
-        }
-    }
-
-    // Always save to IndexedDB as well (local cache)
+    // Always save to IndexedDB first (local cache)
     if (data.scriptData) {
         await indexedDB.saveScriptData(projectId, data.scriptData);
     }
@@ -159,6 +202,20 @@ export const saveProjectData = async (
     if (data.globalHistory) {
         for (const image of data.globalHistory) {
             await indexedDB.saveHistoryImage(image);
+        }
+    }
+
+    const user = getCurrentUser();
+    if (user) {
+        // Try to save to Firestore (non-blocking)
+        try {
+            await withTimeout(
+                firebaseSaveProjectData(projectId, data),
+                FIRESTORE_TIMEOUT,
+                false
+            );
+        } catch (error) {
+            console.error('Failed to save project data to Firestore:', error);
         }
     }
 };
@@ -175,10 +232,15 @@ export const loadProjectData = async (projectId: string): Promise<{
     const user = getCurrentUser();
 
     if (user) {
-        // Try to load from Firestore first
+        // Try to load from Firestore first with timeout
         try {
-            const cloudData = await firebaseLoadProjectData(projectId);
-            if (cloudData) {
+            const cloudData = await withTimeout(
+                firebaseLoadProjectData(projectId),
+                FIRESTORE_TIMEOUT,
+                null
+            );
+
+            if (cloudData && (cloudData.scriptData || cloudData.moodBoards.length > 0 || cloudData.globalHistory.length > 0)) {
                 // Also load library from IndexedDB (not stored in Firestore)
                 const library = await indexedDB.getLibrary(projectId);
                 return {
@@ -213,37 +275,43 @@ export const loadProjectData = async (projectId: string): Promise<{
  * Save script data
  */
 export const saveScriptData = async (projectId: string, scriptData: ScriptData): Promise<void> => {
-    const user = getCurrentUser();
+    // Always save locally first
+    await indexedDB.saveScriptData(projectId, scriptData);
 
+    const user = getCurrentUser();
     if (user) {
         try {
-            await firebaseSaveProjectData(projectId, { scriptData });
+            await withTimeout(
+                firebaseSaveProjectData(projectId, { scriptData }),
+                FIRESTORE_TIMEOUT,
+                false
+            );
         } catch (error) {
             console.error('Failed to save script data to Firestore:', error);
         }
     }
-
-    // Always save locally
-    await indexedDB.saveScriptData(projectId, scriptData);
 };
 
 /**
  * Save mood boards
  */
 export const saveMoodBoards = async (projectId: string, moodBoards: MoodBoard[]): Promise<void> => {
-    const user = getCurrentUser();
+    // Always save locally first
+    for (const board of moodBoards) {
+        await indexedDB.saveMoodBoard(projectId, board);
+    }
 
+    const user = getCurrentUser();
     if (user) {
         try {
-            await firebaseSaveProjectData(projectId, { moodBoards });
+            await withTimeout(
+                firebaseSaveProjectData(projectId, { moodBoards }),
+                FIRESTORE_TIMEOUT,
+                false
+            );
         } catch (error) {
             console.error('Failed to save mood boards to Firestore:', error);
         }
-    }
-
-    // Always save locally
-    for (const board of moodBoards) {
-        await indexedDB.saveMoodBoard(projectId, board);
     }
 };
 
@@ -251,18 +319,21 @@ export const saveMoodBoards = async (projectId: string, moodBoards: MoodBoard[])
  * Save history image
  */
 export const saveHistoryImage = async (projectId: string, image: GeneratedImage, allHistory: GeneratedImage[]): Promise<void> => {
-    const user = getCurrentUser();
+    // Always save locally first
+    await indexedDB.saveHistoryImage(image);
 
+    const user = getCurrentUser();
     if (user) {
         try {
-            await firebaseSaveProjectData(projectId, { globalHistory: allHistory });
+            await withTimeout(
+                firebaseSaveProjectData(projectId, { globalHistory: allHistory }),
+                FIRESTORE_TIMEOUT,
+                false
+            );
         } catch (error) {
             console.error('Failed to save history to Firestore:', error);
         }
     }
-
-    // Always save locally
-    await indexedDB.saveHistoryImage(image);
 };
 
 // Re-export IndexedDB functions for operations not yet migrated
