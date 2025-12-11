@@ -180,9 +180,12 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
       if (referenceImage) {
         // Add reference image as a high-priority style reference
         // IMPORTANT: generateImage() uses ref.data not ref.url for the image data
+        const scaleConsistency = 'SCALE CONSISTENCY: Maintain consistent object scale and proportions across all shots. Objects should appear at the same physical size relative to surrounding elements (tables, hands, characters, environment). A bottle that fits in someone\'s hand should remain hand-sized in all shots, regardless of camera angle or framing. Scale relationships between objects must remain constant.';
+
         const styleDesc = [
           styleFromReference ? 'CRITICAL: Match this EXACT visual style, color palette, lighting, and artistic treatment.' : '',
-          charactersFromReference ? 'CRITICAL: Keep ALL characters looking EXACTLY like this - same face, body, clothes, colors.' : ''
+          charactersFromReference ? 'CRITICAL: Keep ALL characters looking EXACTLY like this - same face, body, clothes, colors.' : '',
+          styleFromReference ? scaleConsistency : ''
         ].filter(Boolean).join(' ');
 
         enhancedRefs = [
@@ -198,9 +201,11 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
       }
 
       // Build style instructions from reference toggles
+      const scaleInstructions = 'Maintain consistent object scale and proportions across all shots. Objects should appear at the same physical size relative to surrounding elements.';
       const styleInstructions = referenceImage ? [
         styleFromReference ? 'CRITICAL: Match the exact visual style, color palette, lighting, and artistic treatment from the reference image.' : '',
-        charactersFromReference ? 'CRITICAL: Maintain exact character consistency - same appearance, proportions, colors, and design details as shown in the reference image.' : ''
+        charactersFromReference ? 'CRITICAL: Maintain exact character consistency - same appearance, proportions, colors, and design details as shown in the reference image.' : '',
+        styleFromReference ? scaleInstructions : ''
       ].filter(Boolean).join(' ') : '';
 
       // Enhance subject description with style instructions
