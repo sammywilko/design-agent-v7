@@ -1,7 +1,9 @@
 
 import React, { useState } from 'react';
 import { Project } from '../types';
-import { Plus, FolderOpen, Trash2, ArrowRight, LayoutGrid } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, ArrowRight, LayoutGrid, LogIn, User, LogOut, Cloud, HardDrive } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import AuthModal from './AuthModal';
 
 interface ProjectDashboardProps {
   projects: Project[];
@@ -13,6 +15,9 @@ interface ProjectDashboardProps {
 const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect, onCreate, onDelete }) => {
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const { isAuthenticated, isLoading: isAuthLoading, user, logout, isFirebaseAvailable } = useAuth();
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,12 +29,81 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
   };
 
   return (
-    <div className="flex h-full w-full bg-slate-950 text-white items-center justify-center p-8">
-      <div className="max-w-4xl w-full">
-        <div className="mb-12 text-center">
-            <h1 className="text-4xl font-light tracking-tight mb-2">Design Agent <span className="text-violet-500 font-bold">8.0</span><span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">BETA</span></h1>
-            <p className="text-slate-400">Select a project to begin your studio session.</p>
+    <div className="flex flex-col h-full w-full bg-slate-950 text-white">
+      {/* Auth Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+
+      {/* Header with Auth */}
+      <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="bg-gradient-to-br from-violet-600 to-indigo-600 p-1.5 rounded-lg">
+            <LayoutGrid className="w-4 h-4 text-white" />
+          </div>
+          <span className="text-sm font-medium text-slate-300">Design Agent</span>
         </div>
+
+        {/* Auth Status / Login Button */}
+        <div className="flex items-center gap-3">
+          {isFirebaseAvailable && (
+            <>
+              {isAuthLoading ? (
+                <div className="text-xs text-slate-500">Loading...</div>
+              ) : isAuthenticated && user ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                    <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-xs text-emerald-400">Cloud Sync</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {user.photoURL ? (
+                      <img src={user.photoURL} alt="" className="w-7 h-7 rounded-full" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center">
+                        <User className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                    <span className="text-sm text-slate-300 hidden sm:block">{user.displayName || user.email}</span>
+                  </div>
+                  <button
+                    onClick={logout}
+                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                    title="Sign Out"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg">
+                    <HardDrive className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-xs text-slate-400">Local Storage</span>
+                  </div>
+                  <button
+                    onClick={() => setShowAuthModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    Sign In
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
+        <div className="max-w-4xl w-full">
+          <div className="mb-12 text-center">
+              <h1 className="text-4xl font-light tracking-tight mb-2">Design Agent <span className="text-violet-500 font-bold">8.0</span><span className="ml-2 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">BETA</span></h1>
+              <p className="text-slate-400">Select a project to begin your studio session.</p>
+              {!isAuthenticated && isFirebaseAvailable && (
+                <p className="text-slate-500 text-sm mt-2">
+                  <button onClick={() => setShowAuthModal(true)} className="text-violet-400 hover:text-violet-300 underline">Sign in</button> to sync projects across devices
+                </p>
+              )}
+          </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Create New Card */}
@@ -84,6 +158,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
                </button>
             </div>
           ))}
+        </div>
         </div>
       </div>
     </div>
