@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle, ImagePlus, Palette, Trash2 } from 'lucide-react';
+import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle, ImagePlus, Palette, Trash2, Plus, BookOpen, RefreshCw } from 'lucide-react';
 import {
   generateContactSheet,
   generateCoveragePack,
@@ -28,6 +28,10 @@ interface ContactSheetModalProps {
   characters?: CharacterProfile[];
   locations?: LocationProfile[];
   products?: ProductProfile[];
+  // Action callbacks for shot integration
+  onAddToStoryboard?: (image: GeneratedImage, shotType: string) => void;
+  onSaveToBible?: (image: GeneratedImage, entityType: 'character' | 'location' | 'product') => void;
+  onUseAsReference?: (image: GeneratedImage) => void;
 }
 
 type GeneratorMode = 'cinematic-9' | 'contact-sheet' | 'dialogue' | 'action';
@@ -49,7 +53,10 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
   showNotification,
   characters = [],
   locations = [],
-  products = []
+  products = [],
+  onAddToStoryboard,
+  onSaveToBible,
+  onUseAsReference
 }) => {
   const [mode, setMode] = useState<GeneratorMode>('cinematic-9');
   const [stylePreset, setStylePreset] = useState<ContentStylePreset>('narrative');
@@ -172,12 +179,19 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
       let enhancedRefs = [...references];
       if (referenceImage) {
         // Add reference image as a high-priority style reference
+        // IMPORTANT: generateImage() uses ref.data not ref.url for the image data
+        const styleDesc = [
+          styleFromReference ? 'CRITICAL: Match this EXACT visual style, color palette, lighting, and artistic treatment.' : '',
+          charactersFromReference ? 'CRITICAL: Keep ALL characters looking EXACTLY like this - same face, body, clothes, colors.' : ''
+        ].filter(Boolean).join(' ');
+
         enhancedRefs = [
           {
             id: 'style-reference',
-            url: referenceImage,
-            type: 'image' as const,
-            label: 'Style & Character Reference'
+            data: referenceImage,  // base64 data URL - this is what generateImage expects
+            type: 'Style' as const,
+            name: 'MASTER REFERENCE - Match This Exactly',
+            styleDescription: styleDesc || 'Match this reference image style and characters exactly.'
           },
           ...enhancedRefs
         ];
@@ -717,17 +731,57 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   {cinematicResult.shots.map((shot, idx) => (
                     <div
                       key={idx}
-                      className={`relative rounded-xl overflow-hidden border ${
+                      className={`relative rounded-xl overflow-hidden border group ${
                         shot.failed ? 'border-red-500/50 bg-red-950/20' : 'border-zinc-700 bg-zinc-800'
                       }`}
                     >
                       <div className="aspect-video bg-zinc-900 relative">
                         {shot.image ? (
-                          <img
-                            src={shot.image.url}
-                            alt={shot.spec.label}
-                            className="w-full h-full object-cover"
-                          />
+                          <>
+                            <img
+                              src={shot.image.url}
+                              alt={shot.spec.label}
+                              className="w-full h-full object-cover"
+                            />
+                            {/* Action buttons overlay */}
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                              {onAddToStoryboard && (
+                                <button
+                                  onClick={() => onAddToStoryboard(shot.image!, shot.spec.shotType)}
+                                  className="p-2 bg-violet-600 hover:bg-violet-700 rounded-lg text-white transition-colors"
+                                  title="Add to Storyboard"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                              )}
+                              {onSaveToBible && (
+                                <button
+                                  onClick={() => onSaveToBible(shot.image!, 'character')}
+                                  className="p-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-white transition-colors"
+                                  title="Save to Bible"
+                                >
+                                  <BookOpen className="w-4 h-4" />
+                                </button>
+                              )}
+                              {onUseAsReference && (
+                                <button
+                                  onClick={() => onUseAsReference(shot.image!)}
+                                  className="p-2 bg-amber-600 hover:bg-amber-700 rounded-lg text-white transition-colors"
+                                  title="Use as Reference"
+                                >
+                                  <RefreshCw className="w-4 h-4" />
+                                </button>
+                              )}
+                              <a
+                                href={shot.image.url}
+                                download={`${shot.spec.shotType}_${shot.spec.label}.png`}
+                                className="p-2 bg-zinc-600 hover:bg-zinc-500 rounded-lg text-white transition-colors"
+                                title="Download"
+                              >
+                                <Download className="w-4 h-4" />
+                              </a>
+                            </div>
+                          </>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             {shot.failed ? (
@@ -759,17 +813,57 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   {result.shots.map((shot, idx) => (
                     <div
                       key={idx}
-                      className={`relative rounded-xl overflow-hidden border ${
+                      className={`relative rounded-xl overflow-hidden border group ${
                         shot.failed ? 'border-red-500/50 bg-red-950/20' : 'border-zinc-700 bg-zinc-800'
                       }`}
                     >
-                      <div className="aspect-video bg-zinc-900">
+                      <div className="aspect-video bg-zinc-900 relative">
                         {shot.image ? (
-                          <img
-                            src={shot.image.url}
-                            alt={`${shot.type} ${shot.angle}`}
-                            className="w-full h-full object-cover"
-                          />
+                          <>
+                            <img
+                              src={shot.image.url}
+                              alt={`${shot.type} ${shot.angle}`}
+                              className="w-full h-full object-cover"
+                            />
+                            {/* Action buttons overlay */}
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                              {onAddToStoryboard && (
+                                <button
+                                  onClick={() => onAddToStoryboard(shot.image!, shot.type)}
+                                  className="p-1.5 bg-violet-600 hover:bg-violet-700 rounded text-white transition-colors"
+                                  title="Add to Storyboard"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              )}
+                              {onSaveToBible && (
+                                <button
+                                  onClick={() => onSaveToBible(shot.image!, 'character')}
+                                  className="p-1.5 bg-emerald-600 hover:bg-emerald-700 rounded text-white transition-colors"
+                                  title="Save to Bible"
+                                >
+                                  <BookOpen className="w-3 h-3" />
+                                </button>
+                              )}
+                              {onUseAsReference && (
+                                <button
+                                  onClick={() => onUseAsReference(shot.image!)}
+                                  className="p-1.5 bg-amber-600 hover:bg-amber-700 rounded text-white transition-colors"
+                                  title="Use as Reference"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                </button>
+                              )}
+                              <a
+                                href={shot.image.url}
+                                download={`${shot.type}_${shot.angle}.png`}
+                                className="p-1.5 bg-zinc-600 hover:bg-zinc-500 rounded text-white transition-colors"
+                                title="Download"
+                              >
+                                <Download className="w-3 h-3" />
+                              </a>
+                            </div>
+                          </>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             {shot.failed ? (

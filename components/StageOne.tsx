@@ -1083,6 +1083,37 @@ Product (${prodNames}) should be naturally integrated into the environment:
           }
         }}
         showNotification={showNotification}
+        characters={bibleCharacters}
+        locations={bibleLocations}
+        products={bibleProducts}
+        onAddToStoryboard={(image, shotType) => {
+          // Add image to history first
+          if (onImageGenerated) {
+            onImageGenerated([{ ...image, projectId: currentProject.id }]);
+          }
+          // Then send to storyboard if available
+          if (onSendToStoryboard) {
+            onSendToStoryboard(image.url, `${shotType} shot`);
+          }
+          showNotification(`Added ${shotType} to storyboard`);
+        }}
+        onSaveToBible={(image, entityType) => {
+          // This will trigger the Photo to Character modal flow
+          // For now, show notification about how to use it
+          showNotification(`To save as ${entityType}, use "Photo → Character" tool in World Bible`);
+        }}
+        onUseAsReference={(image) => {
+          // Add to references array
+          const newRef = {
+            id: crypto.randomUUID(),
+            data: image.url,
+            type: 'Style' as const,
+            name: 'Contact Sheet Reference',
+            styleDescription: 'Use this as style reference for future generations'
+          };
+          setReferences(prev => [...prev, newRef]);
+          showNotification('Added to references - will influence next generation');
+        }}
       />
       
       {/* Power Tool Input Modal */}
