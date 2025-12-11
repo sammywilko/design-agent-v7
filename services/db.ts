@@ -533,6 +533,27 @@ export const db = {
           };
           request.onerror = () => reject(request.error);
       });
+  },
+
+  /**
+   * Clear all IndexedDB data (used on logout)
+   */
+  clearAllData: async (): Promise<void> => {
+      return new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(DB_NAME);
+          request.onsuccess = () => {
+              console.log('IndexedDB cleared successfully');
+              resolve();
+          };
+          request.onerror = () => {
+              console.error('Failed to clear IndexedDB:', request.error);
+              reject(request.error);
+          };
+          request.onblocked = () => {
+              console.warn('IndexedDB deletion blocked - closing connections');
+              resolve(); // Continue anyway
+          };
+      });
   }
 };
 

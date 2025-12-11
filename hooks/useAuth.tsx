@@ -18,6 +18,7 @@ import {
     UserDocument,
     User
 } from '../services/firebase';
+import { db } from '../services/db';
 
 export interface AuthState {
     user: User | null;
@@ -148,11 +149,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     /**
-     * Sign out
+     * Sign out - clears local data and reloads
      */
     const logout = useCallback(async (): Promise<void> => {
         try {
             await signOut();
+            // Clear all local IndexedDB data on logout
+            await db.clearAllData();
+            // Reload the page to reset all app state
+            window.location.reload();
         } catch (error) {
             console.error('Logout failed:', error);
         }
