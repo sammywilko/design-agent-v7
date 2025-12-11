@@ -645,21 +645,31 @@ export const createCloudProject = async (
  */
 export const getUserProjects = async (userId: string): Promise<CloudProject[]> => {
     const firestore = getDb();
-    if (!firestore) return [];
+    if (!firestore) {
+        console.warn('Firestore not initialized');
+        return [];
+    }
 
     try {
         const projectsRef = collection(firestore, 'userProjects');
+        // Simple query without orderBy to avoid needing composite index
         const q = query(
             projectsRef,
-            where('ownerId', '==', userId),
-            orderBy('updatedAt', 'desc')
+            where('ownerId', '==', userId)
         );
 
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as CloudProject);
-    } catch (error) {
-        console.error('Failed to get user projects:', error);
-        return [];
+        const projects = snapshot.docs.map(doc => doc.data() as CloudProject);
+
+        // Sort client-side instead of using Firestore orderBy
+        return projects.sort((a, b) => {
+            const aTime = a.updatedAt?.toMillis?.() || 0;
+            const bTime = b.updatedAt?.toMillis?.() || 0;
+            return bTime - aTime; // descending
+        });
+    } catch (error: any) {
+        console.error('Failed to get user projects:', error?.message || error);
+        throw error; // Re-throw so storage.ts can handle fallback
     }
 };
 
