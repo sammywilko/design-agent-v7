@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle, ImagePlus, Palette, Trash2 } from 'lucide-react';
 import {
   generateContactSheet,
   generateCoveragePack,
@@ -65,7 +65,32 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
   const [lockedLocations, setLockedLocations] = useState<string[]>([]);
   const [lockedProducts, setLockedProducts] = useState<string[]>([]);
 
+  // Reference image for style/character consistency
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [styleFromReference, setStyleFromReference] = useState(true);
+  const [charactersFromReference, setCharactersFromReference] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
+
+  // Handle reference image upload
+  const handleReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setReferenceImage(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearReferenceImage = () => {
+    setReferenceImage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   // Build entity locks from Bible data
   const buildEntityLocks = (): EntityLock[] => {
@@ -143,14 +168,40 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
     setProgress({ completed: 0, total: totalShots, current: 'Starting...' });
 
     try {
+      // Build enhanced references including the reference image if provided
+      let enhancedRefs = [...references];
+      if (referenceImage) {
+        // Add reference image as a high-priority style reference
+        enhancedRefs = [
+          {
+            id: 'style-reference',
+            url: referenceImage,
+            type: 'image' as const,
+            label: 'Style & Character Reference'
+          },
+          ...enhancedRefs
+        ];
+      }
+
+      // Build style instructions from reference toggles
+      const styleInstructions = referenceImage ? [
+        styleFromReference ? 'CRITICAL: Match the exact visual style, color palette, lighting, and artistic treatment from the reference image.' : '',
+        charactersFromReference ? 'CRITICAL: Maintain exact character consistency - same appearance, proportions, colors, and design details as shown in the reference image.' : ''
+      ].filter(Boolean).join(' ') : '';
+
+      // Enhance subject description with style instructions
+      const enhancedSubject = styleInstructions
+        ? `${subjectDescription}\n\n[STYLE LOCK INSTRUCTIONS: ${styleInstructions}]`
+        : subjectDescription;
+
       if (mode === 'cinematic-9') {
         const entityLocks = buildEntityLocks();
         const cinematicRes = await generateCinematic9ShotSheet(
-          subjectDescription,
+          enhancedSubject,
           sceneContext,
           stylePreset,
           entityLocks,
-          references,
+          enhancedRefs,
           config,
           (completed, total, current) => {
             setProgress({ completed, total, current });
@@ -173,9 +224,9 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
 
         if (mode === 'contact-sheet') {
           contactResult = await generateContactSheet(
-            subjectDescription,
+            enhancedSubject,
             sceneContext,
-            references,
+            enhancedRefs,
             config,
             (completed, total, current) => {
               setProgress({ completed, total, current });
@@ -184,9 +235,9 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
         } else {
           contactResult = await generateCoveragePack(
             mode === 'dialogue' ? 'dialogue' : 'action',
-            subjectDescription,
+            enhancedSubject,
             sceneContext,
-            references,
+            enhancedRefs,
             config,
             (completed, total, current) => {
               setProgress({ completed, total, current });
@@ -356,6 +407,85 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   </p>
                 </div>
               )}
+
+              {/* Reference Image Upload */}
+              <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-zinc-400 uppercase flex items-center gap-2">
+                    <ImagePlus className="w-4 h-4" />
+                    Reference Image (Style Lock)
+                  </h3>
+                  {referenceImage && (
+                    <button
+                      onClick={clearReferenceImage}
+                      className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-500 mb-3">
+                  Upload a reference image to maintain consistent style and character appearance across all generated shots
+                </p>
+
+                {referenceImage ? (
+                  <div className="space-y-3">
+                    {/* Preview */}
+                    <div className="relative w-48 h-32 rounded-lg overflow-hidden border border-zinc-600">
+                      <img
+                        src={referenceImage}
+                        alt="Style reference"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-violet-600 text-white text-[9px] font-bold rounded">
+                        REFERENCE
+                      </div>
+                    </div>
+
+                    {/* Style Lock Options */}
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={styleFromReference}
+                          onChange={(e) => setStyleFromReference(e.target.checked)}
+                          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-violet-600 focus:ring-violet-500"
+                        />
+                        <span className="text-xs text-zinc-300 flex items-center gap-1">
+                          <Palette className="w-3 h-3" />
+                          Lock Visual Style
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={charactersFromReference}
+                          onChange={(e) => setCharactersFromReference(e.target.checked)}
+                          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-violet-600 focus:ring-violet-500"
+                        />
+                        <span className="text-xs text-zinc-300 flex items-center gap-1">
+                          <User className="w-3 h-3" />
+                          Lock Characters
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-zinc-600 rounded-lg cursor-pointer hover:border-violet-500/50 hover:bg-zinc-800/50 transition-all">
+                    <ImagePlus className="w-8 h-8 text-zinc-500 mb-2" />
+                    <span className="text-xs text-zinc-500">Click to upload reference image</span>
+                    <span className="text-[10px] text-zinc-600 mt-1">PNG, JPG up to 10MB</span>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleReferenceUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
 
               {/* Entity Locking - only for cinematic mode */}
               {mode === 'cinematic-9' && hasEntities && (
@@ -531,9 +661,15 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   <>
                     <Camera className="w-5 h-5" />
                     Generate {modeConfig.label}
+                    {referenceImage && (
+                      <span className="text-xs bg-emerald-500 px-2 py-0.5 rounded-full ml-2 flex items-center gap-1">
+                        <ImagePlus className="w-3 h-3" />
+                        Style Locked
+                      </span>
+                    )}
                     {totalLocked > 0 && (
                       <span className="text-xs bg-violet-500 px-2 py-0.5 rounded-full ml-2">
-                        {totalLocked} entities locked
+                        {totalLocked} entities
                       </span>
                     )}
                   </>
