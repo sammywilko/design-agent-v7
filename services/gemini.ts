@@ -3,6 +3,17 @@ import { GoogleGenAI, Type, Schema, Part } from "@google/genai";
 import { DirectorResponse, GeneratedImage, GenerationConfig, ReferenceAsset, GeneratedVideo, Beat, CharacterProfile, CoverageAnalysis, Lookbook, ToolMode, ReferenceBundle, QualityScore, MoodBoard, LocationProfile, ProductProfile, VariantType, ProductionDesign, StyleDNA, ProjectDefaultStyle, CharacterSpecs as CharacterSpecsType } from "../types";
 import { sanitizePrompt, validatePrompt, validateImageDataUrl, validateReferenceCount } from "./validation";
 
+// ============================================================================
+// MODEL CONFIGURATION - PRIMARY + FALLBACK
+// ============================================================================
+const PRIMARY_IMAGE_MODEL = 'gemini-3-pro-image-preview';      // Nano Banana Pro - 14 refs max
+const FALLBACK_IMAGE_MODEL = 'gemini-2.5-flash-preview-image-generation';  // Flash - 3 refs max
+const FALLBACK_MAX_REFS = 3;  // Flash model limitation
+
+// Track which model is currently being used
+let currentImageModel = PRIMARY_IMAGE_MODEL;
+let usingFallbackModel = false;
+
 const NANO_BANANA_GUIDE = `
 NANO BANANA PRO (GEMINI 3 PRO IMAGE) MASTER GUIDE:
 1. IDENTITY: "Nano Banana Pro" is the internal codename for Gemini 3 Pro Image. It is a "Reasoning-Guided" generator, not just diffusion.
@@ -150,22 +161,206 @@ If the user asks for "Change Angle" or "Relight", use spatial reasoning to recon
 `;
 
 const SYSTEM_INSTRUCTION_PRODUCER = `
-You are "The Producer", an expert AI Assistant for the Design Agent 4.0 Studio App.
-Your audience: Students and Creative Directors.
+You are "The Producer" — an intelligent AI production partner for Design Agent 8.0 Studio.
+You have FULL visibility into the user's project and proactively guide them through professional visual production.
 
-KNOWLEDGE BASE:
+=== YOUR IDENTITY ===
+Think of yourself as a seasoned Hollywood line producer crossed with a technical VFX supervisor.
+You understand storytelling, visual grammar, and AI generation capabilities.
+Your job: Guide users to GREAT outcomes efficiently.
+
+=== KNOWLEDGE BASE ===
 1. IMAGE GENERATION (Nano Banana Pro / Gemini 3 Image):
 ${NANO_BANANA_GUIDE}
 
 2. VIDEO GENERATION (Veo 3.1):
 ${VEO_PROMPTING_GUIDE}
 
-YOUR DUAL ROLE:
-1. THE APP GUIDE: Teach users how to use Stage 1 (Concept), Stage 2 (Edit), Stage 3 (Storyboard), and Stage 4 (Video).
-2. THE SCRIPTWRITER: Help users brainstorm.
+=== DESIGN AGENT 8.0 WORKFLOW ===
+Stage 0 (Script Studio): Write scripts, define beats, extract characters/locations/products
+Stage 1 (Concept Lab): Generate initial concept images with references
+Stage 2 (Edit Canvas): Refine images with masking, relighting, style changes
+Stage 3 (Storyboard): Arrange sequences, add transitions, define timing
+Stage 4 (Video Lab): Generate video clips with Veo 3.1
 
-Tone: Professional, Encouraging, Concise, and Expert.
+World Bible: Characters, Locations, Products with visual DNA (prompt snippets, reference images)
+Contact Sheet: All generated images + uploaded references
+Lookbook: Style DNA, color palette, lighting approach, camera language
+
+=== YOUR CAPABILITIES ===
+
+1. PROACTIVE GUIDANCE (Analyze context and suggest next steps):
+   - Missing assets: "Your beat mentions 'Jake' but he's not in your Character Bible. Add him?"
+   - Workflow optimization: "You're editing raw concepts. Consider building World Bible first for consistency."
+   - Quality improvement: "Your last 3 generations lacked references. Add character refs for better results."
+
+2. SMART WORKFLOW GUIDANCE:
+   - Stage-specific tips based on current context
+   - Explain features in context of what user is doing
+   - Suggest optimal workflows based on project state
+
+3. QUALITY CONTROL:
+   - Identify potential consistency issues
+   - Suggest missing coverage (character angles, location variants)
+   - Flag prompts that may cause issues
+
+4. PRODUCTION PLANNING:
+   - Estimate generation counts based on script
+   - Identify critical assets that need creation first
+   - Suggest efficient generation order
+
+5. SCRIPT ANALYSIS:
+   - Break vague creative direction into specific shots
+   - Identify all entities mentioned in scripts
+   - Suggest shot types and camera angles
+
+6. BEST PRACTICES COACHING:
+   - Reference image strategies
+   - Prompt engineering tips
+   - Consistency techniques
+
+=== RESPONSE FORMAT ===
+- Be concise but thorough
+- Use markdown formatting
+- When appropriate, include:
+  * 🎬 Production tips
+  * ⚠️ Warnings about potential issues
+  * 💡 Optimization suggestions
+  * ✅ What's working well
+
+=== CONTEXT USAGE ===
+You will receive PROJECT CONTEXT with each message showing:
+- Current stage and what user is doing
+- World Bible asset inventory
+- Script/beat status
+- Generation history
+- Storyboard progress
+
+USE THIS CONTEXT to give SPECIFIC, RELEVANT advice.
+Don't give generic tips - relate everything to their actual project state.
+
+Tone: Professional, Direct, Proactive, Expert. No fluff.
 `;
+
+// Build context string from ProducerContext object
+const buildProducerContextString = (context: any): string => {
+    if (!context || typeof context === 'string') return context || '';
+
+    const lines: string[] = ['=== PROJECT CONTEXT ==='];
+
+    // Current Stage
+    const stageName = context.currentStage?.replace(/_/g, ' ') || 'Unknown';
+    lines.push('');
+    lines.push('📍 CURRENT STAGE: ' + stageName);
+
+    // World Bible Summary
+    if (context.worldBible) {
+        const wb = context.worldBible;
+        lines.push('');
+        lines.push('📚 WORLD BIBLE:');
+
+        if (wb.characters?.length > 0) {
+            lines.push('  Characters (' + wb.characters.length + '):');
+            wb.characters.forEach((c: any) => {
+                const status = [];
+                if (c.hasCharacterSheet) status.push('✓ Sheet');
+                if (c.hasExpressionBank) status.push('✓ Expressions');
+                if (c.hasPromptSnippet) status.push('✓ DNA');
+                if (c.isLocked) status.push('🔒 Locked');
+                const statusStr = status.length ? '(' + status.join(', ') + ')' : '(needs setup)';
+                lines.push('    - ' + c.name + ': ' + c.imageRefCount + ' refs ' + statusStr);
+            });
+        } else {
+            lines.push('  Characters: None defined');
+        }
+
+        if (wb.locations?.length > 0) {
+            lines.push('  Locations (' + wb.locations.length + '):');
+            wb.locations.forEach((l: any) => {
+                const status = [];
+                if (l.hasAnchorImage) status.push('✓ Anchor');
+                if (l.hasPromptSnippet) status.push('✓ DNA');
+                const statusStr = status.length ? '(' + status.join(', ') + ')' : '';
+                lines.push('    - ' + l.name + ': ' + l.imageRefCount + ' refs ' + statusStr);
+            });
+        } else {
+            lines.push('  Locations: None defined');
+        }
+
+        if (wb.products?.length > 0) {
+            lines.push('  Products (' + wb.products.length + '):');
+            wb.products.forEach((p: any) => {
+                const dnaStr = p.hasPromptSnippet ? '(✓ DNA)' : '';
+                lines.push('    - ' + p.name + ': ' + p.imageRefCount + ' refs ' + dnaStr);
+            });
+        }
+    }
+
+    // Script Summary
+    if (context.script) {
+        lines.push('');
+        lines.push('📝 SCRIPT:');
+        lines.push('  ' + context.script.beatCount + ' beats defined');
+        const completedBeats = context.script.beats?.filter((b: any) => b.hasGeneratedImages).length || 0;
+        lines.push('  ' + completedBeats + '/' + context.script.beatCount + ' beats have generated images');
+
+        // Show beats with missing character refs
+        const beatsWithMissingRefs = context.script.beats?.filter((b: any) => {
+            const allChars = context.worldBible?.characters?.map((c: any) => c.name.toLowerCase()) || [];
+            return b.characters?.some((char: string) => !allChars.includes(char.toLowerCase()));
+        });
+        if (beatsWithMissingRefs?.length > 0) {
+            lines.push('  ⚠️ ' + beatsWithMissingRefs.length + ' beats reference characters not in Bible');
+        }
+    }
+
+    // Production Design
+    if (context.productionDesign) {
+        lines.push('');
+        lines.push('🎨 PRODUCTION DESIGN:');
+        lines.push('  Lookbook: ' + (context.productionDesign.hasLookbook ? '✓ Defined' : '❌ Not set'));
+        if (context.productionDesign.visualStyle) {
+            lines.push('  Style: ' + context.productionDesign.visualStyle);
+        }
+        lines.push('  Lighting Ref: ' + (context.productionDesign.hasLightingRef ? '✓' : '❌'));
+        lines.push('  Camera Rig: ' + (context.productionDesign.hasCameraRig ? '✓' : '❌'));
+    }
+
+    // Generation History
+    if (context.generationHistory) {
+        lines.push('');
+        lines.push('🖼️ GENERATION HISTORY:');
+        lines.push('  Total images: ' + context.generationHistory.totalImages);
+        if (context.generationHistory.failedGenerations > 0) {
+            lines.push('  ⚠️ Failed generations: ' + context.generationHistory.failedGenerations);
+        }
+
+        // Check recent generations for patterns
+        const recent = context.generationHistory.recentGenerations || [];
+        const withoutRefs = recent.filter((g: any) => !g.hadReferences).length;
+        if (withoutRefs > 2) {
+            lines.push('  ⚠️ ' + withoutRefs + '/' + recent.length + ' recent generations had no references (lower consistency)');
+        }
+    }
+
+    // Storyboard
+    if (context.storyboard) {
+        lines.push('');
+        lines.push('🎬 STORYBOARD:');
+        lines.push('  ' + context.storyboard.completedFrames + '/' + context.storyboard.frameCount + ' frames complete');
+        lines.push('  Start+End pairs: ' + context.storyboard.hasStartEndPairs);
+    }
+
+    // Contact Sheet
+    if (context.contactSheet) {
+        lines.push('');
+        lines.push('📸 CONTACT SHEET:');
+        lines.push('  ' + context.contactSheet.imageCount + ' generated images');
+        lines.push('  ' + context.contactSheet.referenceImageCount + ' reference images');
+    }
+
+    return lines.join('\n');
+};
 
 // ============================================
 // API KEY MANAGEMENT WITH FAILOVER
@@ -398,11 +593,13 @@ const withRetry = async <T>(
         }
       }
 
-      // Check if error is retryable
+      // Check if error is retryable (includes 500 server errors)
       const isRetryable =
+        errorMessage.includes('500') ||
         errorMessage.includes('503') ||
         errorMessage.includes('overloaded') ||
         errorMessage.includes('UNAVAILABLE') ||
+        errorMessage.includes('INTERNAL') ||
         errorMessage.includes('timed out') ||
         errorMessage.includes('timeout') ||
         errorMessage.includes('rate limit') ||
@@ -578,13 +775,18 @@ Be critical but fair. An 8+ should be production-ready. A 5-7 needs refinement. 
 /**
  * The Producer: AI Guide & Scriptwriter
  */
-export const consultProducer = async (userQuery: string, currentContext: string): Promise<string> => {
+export const consultProducer = async (userQuery: string, currentContext: string | object): Promise<string> => {
     const ai = await getClient();
-    
+
+    // Build context string from object or use string directly
+    const contextString = typeof currentContext === 'object'
+        ? buildProducerContextString(currentContext)
+        : currentContext;
+
     const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: {
-            parts: [{ text: `User Query: ${userQuery}\n\nCurrent App Context: ${currentContext}` }]
+            parts: [{ text: `${contextString}\n\n=== USER QUERY ===\n${userQuery}` }]
         },
         config: {
             systemInstruction: SYSTEM_INSTRUCTION_PRODUCER
@@ -592,6 +794,28 @@ export const consultProducer = async (userQuery: string, currentContext: string)
     });
 
     return response.text || "I'm having trouble thinking right now. Try again.";
+};
+
+/**
+ * Get proactive suggestions from the Producer based on project state.
+ * Called when the assistant panel opens to provide immediate relevant guidance.
+ */
+export const getProactiveSuggestions = async (context: object): Promise<string> => {
+    const ai = await getClient();
+
+    const contextString = buildProducerContextString(context);
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',  // Use faster model for suggestions
+        contents: {
+            parts: [{ text: `${contextString}\n\n=== TASK ===\nBased on this project context, provide 2-3 brief, specific, actionable suggestions to help the user improve their workflow or fill gaps in their production. Be direct and reference specific assets/beats by name if relevant. Keep it under 150 words total.` }]
+        },
+        config: {
+            systemInstruction: `You are a helpful production assistant. Analyze the project context and give brief, specific suggestions. Focus on: missing assets, workflow improvements, quality issues. Be direct.`
+        }
+    });
+
+    return response.text || "";
 };
 
 /**
@@ -701,7 +925,9 @@ export const consultDirector = async (
 };
 
 /**
- * Stage 1 & 2: Image Generation.
+ * Stage 1 & 2: Image Generation with automatic model fallback.
+ * Primary: Nano Banana Pro (gemini-3-pro-image-preview) - supports up to 14 refs
+ * Fallback: Flash (gemini-2.5-flash-preview-image-generation) - supports up to 3 refs
  */
 export const generateImage = async (
     prompt: string,
@@ -725,88 +951,147 @@ export const generateImage = async (
 
   const ai = await getClient();
 
-  const parts: any[] = [];
-  let explicitPrompt = sanitizedPrompt;
+  // Inner function to attempt generation with a specific model
+  const attemptGeneration = async (modelId: string, refs: ReferenceAsset[]): Promise<GeneratedImage> => {
+    const parts: any[] = [];
+    let explicitPrompt = sanitizedPrompt;
 
-  if (safeReferences.length > 0) {
-      explicitPrompt += "\n\nREFERENCES:";
-      safeReferences.forEach((ref, idx) => {
-        explicitPrompt += `\n- Ref ${idx + 1} (${ref.type}): ${ref.name || 'Image'}`;
-        if (ref.type === 'Style' && ref.styleDescription) {
-            explicitPrompt += ` (Style DNA: ${ref.styleDescription})`;
-        }
-      });
-      explicitPrompt += "\nUse these references strictly.";
-  }
+    if (refs.length > 0) {
+        explicitPrompt += "\n\nREFERENCES:";
+        refs.forEach((ref, idx) => {
+          explicitPrompt += `\n- Ref ${idx + 1} (${ref.type}): ${ref.name || 'Image'}`;
+          if (ref.type === 'Style' && ref.styleDescription) {
+              explicitPrompt += ` (Style DNA: ${ref.styleDescription})`;
+          }
+        });
+        explicitPrompt += "\nUse these references strictly.";
+    }
 
-  parts.push({ text: explicitPrompt });
+    parts.push({ text: explicitPrompt });
 
-  if (safeReferences.length > 0) {
-      safeReferences.forEach((ref) => {
-          parts.push({
-            inlineData: {
-                data: cleanDataUrl(ref.data),
-                mimeType: getMimeType(ref.data)
-            }
-          });
-      });
-  }
-  
-  const requestConfig: any = {
-     responseModalities: ['TEXT', 'IMAGE'],
-     imageConfig: {
-       imageSize: config.resolution,
-       aspectRatio: config.aspectRatio
-     }
-  };
+    if (refs.length > 0) {
+        refs.forEach((ref) => {
+            parts.push({
+              inlineData: {
+                  data: cleanDataUrl(ref.data),
+                  mimeType: getMimeType(ref.data)
+              }
+            });
+        });
+    }
 
-  if (useGrounding) {
-      requestConfig.tools = [{ googleSearch: {} }];
-  }
-  
-  // Calculate dynamic timeout based on complexity
-  const dynamicTimeout = calculateDynamicTimeout(prompt, safeReferences.length);
+    const requestConfig: any = {
+       responseModalities: ['TEXT', 'IMAGE'],
+       imageConfig: {
+         imageSize: config.resolution,
+         aspectRatio: config.aspectRatio
+       }
+    };
 
-  // Wrap with retry logic for transient failures (503, rate limits, timeouts)
-  const response = await withRetry(
-    async () => withTimeout(
+    if (useGrounding) {
+        requestConfig.tools = [{ googleSearch: {} }];
+    }
+
+    // Calculate dynamic timeout based on complexity
+    const dynamicTimeout = calculateDynamicTimeout(prompt, refs.length);
+
+    const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-3-pro-image-preview',
+        model: modelId,
         contents: {
           parts: parts
         },
         config: requestConfig
       }),
       dynamicTimeout,
-      'Image generation'
-    ),
-    'Image generation',
-    3, // max retries
-    3000 // base delay 3s
-  );
+      `Image generation (${modelId})`
+    );
 
-  const candidates = response.candidates;
-  if (!candidates || candidates.length === 0) throw new Error("No image generated");
+    const candidates = response.candidates;
+    if (!candidates || candidates.length === 0) throw new Error("No image generated");
 
-  const contentParts = candidates[0].content.parts;
-  let base64Data = "";
-  
-  for (const part of contentParts) {
-    if (part.inlineData) {
-      base64Data = part.inlineData.data;
-      break;
+    const contentParts = candidates[0].content.parts;
+    let base64Data = "";
+
+    for (const part of contentParts) {
+      if (part.inlineData) {
+        base64Data = part.inlineData.data;
+        break;
+      }
     }
-  }
 
-  if (!base64Data) throw new Error("No image data found in response");
+    if (!base64Data) throw new Error("No image data found in response");
 
-  return {
-    id: crypto.randomUUID(),
-    projectId: '',
-    url: `data:image/png;base64,${base64Data}`,
-    prompt: prompt,
-    aspectRatio: config.aspectRatio
+    return {
+      id: crypto.randomUUID(),
+      projectId: '',
+      url: `data:image/png;base64,${base64Data}`,
+      prompt: prompt,
+      aspectRatio: config.aspectRatio
+    };
   };
+
+  // Try primary model first with retries
+  try {
+    const result = await withRetry(
+      () => attemptGeneration(PRIMARY_IMAGE_MODEL, safeReferences),
+      `Image generation (${PRIMARY_IMAGE_MODEL})`,
+      3, // max retries
+      3000 // base delay 3s
+    );
+
+    // If we were using fallback but primary succeeded, switch back
+    if (usingFallbackModel) {
+      console.log('✅ Primary model recovered, switching back to Nano Banana Pro');
+      currentImageModel = PRIMARY_IMAGE_MODEL;
+      usingFallbackModel = false;
+    }
+
+    return result;
+  } catch (primaryError: any) {
+    const errorMessage = primaryError?.message || '';
+
+    // Check if this is a 500-class server error that warrants fallback
+    const is500Error =
+      errorMessage.includes('500') ||
+      errorMessage.includes('INTERNAL') ||
+      errorMessage.includes('overloaded') ||
+      errorMessage.includes('503') ||
+      errorMessage.includes('UNAVAILABLE');
+
+    if (is500Error) {
+      console.log(`⚠️ Primary model (${PRIMARY_IMAGE_MODEL}) failed with server error. Attempting fallback to Flash...`);
+
+      // Limit references for Flash model (max 3)
+      const fallbackRefs = safeReferences.slice(0, FALLBACK_MAX_REFS);
+      if (safeReferences.length > FALLBACK_MAX_REFS) {
+        console.log(`   Note: Reduced references from ${safeReferences.length} to ${FALLBACK_MAX_REFS} for Flash model`);
+      }
+
+      try {
+        const fallbackResult = await withRetry(
+          () => attemptGeneration(FALLBACK_IMAGE_MODEL, fallbackRefs),
+          `Image generation (${FALLBACK_IMAGE_MODEL})`,
+          3, // max retries
+          2000 // shorter base delay for Flash
+        );
+
+        // Mark that we're using fallback
+        currentImageModel = FALLBACK_IMAGE_MODEL;
+        usingFallbackModel = true;
+        console.log('✅ Fallback to Flash model succeeded');
+
+        return fallbackResult;
+      } catch (fallbackError: any) {
+        console.error('❌ Both primary and fallback models failed');
+        // Throw the original error since both failed
+        throw new Error(`Image generation failed on both models. Primary: ${errorMessage}. Fallback: ${fallbackError?.message || 'Unknown error'}`);
+      }
+    }
+
+    // Not a 500 error, just re-throw
+    throw primaryError;
+  }
 };
 
 /**

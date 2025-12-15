@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Image as ImageIcon, Loader2, Sparkles, Upload, X, Settings, User, Save, Plus, Trash2, Library, Copy, ScanEye, Folder, ChevronDown, Globe, Film, Square, Star, BookOpen, Wand2, Zap, FileText, Palette, Grid, Info, Camera, Lightbulb, Layers, Sliders, Type } from 'lucide-react';
 import { consultDirector, generateImage, generateImageBatch, extractStyleDNA, enhancePrompt, analyzeProductionMetadata, BatchGenerationResult, ProductionMetadata } from '../services/gemini';
 import { db } from '../services/db';
-import { Message, GeneratedImage, DirectorResponse, AspectRatio, ImageResolution, ReferenceAsset, ReferenceType, SavedEntity, Campaign, Project, SavedPrompt, CharacterProfile, LocationProfile, ProductProfile, ProductionDesign } from '../types';
+import { Message, GeneratedImage, DirectorResponse, AspectRatio, ImageResolution, ReferenceAsset, ReferenceType, SavedEntity, Campaign, Project, SavedPrompt, CharacterProfile, LocationProfile, ProductProfile, ProductionDesign, ProductionLogEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import CoverageModal from './CoverageModal';
 import ContactSheetModal from './ContactSheetModal';
@@ -1046,14 +1046,85 @@ Product (${prodNames}) should be naturally integrated into the environment:
         const imageMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: resultContent, timestamp: Date.now(), images: generatedImages };
         await addMessageToStateAndDb(imageMsg);
         if (onImageGenerated) onImageGenerated(generatedImages);
+
+        // Log successful generations to Production Journal
+        for (const img of generatedImages) {
+          const logEntry: ProductionLogEntry = {
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            projectId: currentProject.id,
+            stage: 'concept',
+            action: 'generate',
+            subject: processedPrompt.slice(0, 100),
+            prompt: processedPrompt,
+            references: {
+              characters: mentionedChars.filter(Boolean).map(c => c!.name),
+              locations: mentionedLocs.filter(Boolean).map(l => l!.name),
+              products: mentionedProds.filter(Boolean).map(p => p!.name),
+              moodboard: false,
+              lookbook: useLookbook,
+              lightingRig: !!productionDesign?.lightingAnalysis,
+              cameraRig: !!productionDesign?.cameraRig,
+            },
+            outcome: 'success',
+            resultImageId: img.id,
+          };
+          db.saveProductionLogEntry(logEntry).catch(console.error);
+        }
       } else if (!isCancelledRef.current) {
          const errorMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: `Failed to generate visual assets. ${batchResult.failed.length} attempts failed.`, timestamp: Date.now() };
          await addMessageToStateAndDb(errorMsg);
+
+         // Log failed generation to Production Journal
+         const logEntry: ProductionLogEntry = {
+           id: crypto.randomUUID(),
+           timestamp: Date.now(),
+           projectId: currentProject.id,
+           stage: 'concept',
+           action: 'generate',
+           subject: processedPrompt.slice(0, 100),
+           prompt: processedPrompt,
+           references: {
+             characters: mentionedChars.filter(Boolean).map(c => c!.name),
+             locations: mentionedLocs.filter(Boolean).map(l => l!.name),
+             products: mentionedProds.filter(Boolean).map(p => p!.name),
+             moodboard: false,
+             lookbook: useLookbook,
+             lightingRig: !!productionDesign?.lightingAnalysis,
+             cameraRig: !!productionDesign?.cameraRig,
+           },
+           outcome: 'failed',
+           errorMessage: `${batchResult.failed.length} attempts failed`,
+         };
+         db.saveProductionLogEntry(logEntry).catch(console.error);
       }
     } catch (error) {
       if (!isCancelledRef.current) {
         const errorMsg: Message = { id: crypto.randomUUID(), projectId: currentProject.id, role: 'model', content: "An error occurred. Check API Key.", timestamp: Date.now() };
         await addMessageToStateAndDb(errorMsg);
+
+        // Log error to Production Journal
+        const logEntry: ProductionLogEntry = {
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          projectId: currentProject.id,
+          stage: 'concept',
+          action: 'generate',
+          subject: processedPrompt.slice(0, 100),
+          prompt: processedPrompt,
+          references: {
+            characters: mentionedChars.filter(Boolean).map(c => c!.name),
+            locations: mentionedLocs.filter(Boolean).map(l => l!.name),
+            products: mentionedProds.filter(Boolean).map(p => p!.name),
+            moodboard: false,
+            lookbook: useLookbook,
+            lightingRig: !!productionDesign?.lightingAnalysis,
+            cameraRig: !!productionDesign?.cameraRig,
+          },
+          outcome: 'failed',
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        };
+        db.saveProductionLogEntry(logEntry).catch(console.error);
       }
     } finally { setIsProcessing(false); setLoadingPhase(''); }
   };
@@ -1080,6 +1151,30 @@ Product (${prodNames}) should be naturally integrated into the environment:
             // Assign project IDs to generated images
             const projectImages = images.map(img => ({ ...img, projectId: currentProject.id }));
             onImageGenerated(projectImages);
+
+            // Log contact sheet generation to Production Journal
+            for (const img of projectImages) {
+              const logEntry: ProductionLogEntry = {
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                projectId: currentProject.id,
+                stage: 'concept',
+                action: 'contact_sheet',
+                subject: 'Contact Sheet Generation',
+                references: {
+                  characters: [],
+                  locations: [],
+                  products: [],
+                  moodboard: false,
+                  lookbook: false,
+                  lightingRig: false,
+                  cameraRig: false,
+                },
+                outcome: 'success',
+                resultImageId: img.id,
+              };
+              db.saveProductionLogEntry(logEntry).catch(console.error);
+            }
           }
         }}
         showNotification={showNotification}

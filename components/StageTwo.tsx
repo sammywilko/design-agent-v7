@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square } from 'lucide-react';
-import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem } from '../types';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap } from 'lucide-react';
+import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem, ProductionLogEntry } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
 import CoverageModal from './CoverageModal';
@@ -25,15 +26,65 @@ interface StageTwoProps {
 
 const MAX_REFERENCES = 14;
 
-// UPDATED QUICK EDITS WITH NANO SUPERPOWERS
-const QUICK_EDITS = [
-    { label: 'Enhance', prompt: 'Enhance details, lighting, and sharpness.' },
-    { label: 'Cyberpunk', prompt: 'Cyberpunk style, neon lights, rain, high contrast.' },
-    { label: 'Sketch', prompt: 'Detailed pencil sketch on paper.' },
-    { label: 'Glass', prompt: 'Translucent glass texture, caustic lighting.' },
+// PROFESSIONAL DROPDOWN MENUS - Precise control options
+const ENHANCE_OPTIONS = [
+    { label: 'Auto Enhance', prompt: 'Enhance details, lighting, and sharpness while maintaining natural look.' },
+    { label: 'Brightness +', prompt: 'Increase overall brightness by 20%. Maintain color balance and avoid blown highlights.' },
+    { label: 'Brightness -', prompt: 'Decrease overall brightness by 20%. Preserve shadow detail.' },
+    { label: 'Contrast +', prompt: 'Increase contrast by 25%. Deepen blacks, brighten highlights. Maintain midtone detail.' },
+    { label: 'Contrast -', prompt: 'Reduce contrast by 25%. Soften blacks, lower highlights. Create a flatter, moodier look.' },
+    { label: 'Saturation +', prompt: 'Increase color saturation by 30%. Make colors more vivid and punchy without clipping.' },
+    { label: 'Saturation -', prompt: 'Decrease color saturation by 30%. Create a desaturated, muted color palette.' },
+    { label: 'Sharpen', prompt: 'Apply strong sharpening to edges and fine details. Enhance texture clarity without artifacts.' },
+    { label: 'Noise Reduction', prompt: 'Remove digital noise and grain while preserving edge detail and texture.' },
+    { label: 'HDR Effect', prompt: 'Apply HDR tone mapping. Expand dynamic range, reveal shadow detail, enhance local contrast.' },
+];
+
+const STYLE_OPTIONS = [
+    { label: 'Cyberpunk', prompt: 'Transform into cyberpunk style: neon lights (pink, cyan, purple), rain-slicked streets, high contrast, lens flares, holographic elements.' },
+    { label: 'Watercolor', prompt: 'Transform into delicate watercolor painting: soft wet edges, paper texture, subtle color bleeding, transparent washes.' },
+    { label: 'Oil Painting', prompt: 'Transform into classical oil painting: visible brushstrokes, rich impasto texture, dramatic chiaroscuro lighting.' },
+    { label: 'Pencil Sketch', prompt: 'Transform into detailed pencil sketch on textured paper: fine hatching, tonal gradients, subtle smudging.' },
+    { label: 'Anime', prompt: 'Transform into anime/manga style: clean cel-shading, bold outlines, simplified features, vibrant colors.' },
+    { label: 'Film Noir', prompt: 'Transform into classic film noir: high contrast black & white, dramatic shadows, venetian blind lighting.' },
+    { label: 'Pop Art', prompt: 'Transform into pop art style: bold primary colors, Ben-Day dots, thick black outlines, Warhol/Lichtenstein aesthetic.' },
+    { label: 'Vintage Film', prompt: 'Apply vintage film look: slight grain, faded colors, light leaks, warm color cast, vignette.' },
+    { label: 'Glass/Crystal', prompt: 'Transform subject into translucent glass/crystal: caustic lighting, internal refractions, prismatic colors.' },
+    { label: 'Neon Glow', prompt: 'Add neon glow effect: luminous outlines, light bloom, dark background, electric color palette.' },
+    { label: 'Steampunk', prompt: 'Transform into steampunk aesthetic: brass gears, copper pipes, Victorian machinery, sepia tones.' },
+    { label: 'Vaporwave', prompt: 'Apply vaporwave aesthetic: pink/purple/cyan gradient, 80s graphics, glitch effects, geometric shapes.' },
+];
+
+const ROTATE_OPTIONS = [
+    { label: 'Rotate 15° Right', prompt: 'Rotate the camera angle 15 degrees clockwise to the right. Maintain strict subject consistency (identity, clothes, features). Use spatial reasoning to reveal slight angle change.' },
+    { label: 'Rotate 45° Right', prompt: 'Rotate the camera angle 45 degrees clockwise to the right. Show three-quarter view. Maintain subject identity and all visual details.' },
+    { label: 'Rotate 90° Right', prompt: 'Rotate the camera angle 90 degrees clockwise to show the right side profile. Maintain strict subject consistency.' },
+    { label: 'Rotate 15° Left', prompt: 'Rotate the camera angle 15 degrees counter-clockwise to the left. Maintain strict subject consistency.' },
+    { label: 'Rotate 45° Left', prompt: 'Rotate the camera angle 45 degrees counter-clockwise to the left. Show three-quarter view from the other side.' },
+    { label: 'Rotate 90° Left', prompt: 'Rotate the camera angle 90 degrees counter-clockwise to show the left side profile.' },
+    { label: 'Flip Horizontal', prompt: 'Mirror the image horizontally. Flip left to right while maintaining all visual elements.' },
+    { label: 'Bird\'s Eye View', prompt: 'Re-shoot from directly above, looking straight down. Show top-down perspective.' },
+    { label: 'Worm\'s Eye View', prompt: 'Re-shoot from ground level, looking up. Create dramatic low-angle perspective.' },
+];
+
+const LIGHTING_OPTIONS = [
+    { label: 'Golden Hour', prompt: 'Change lighting to golden hour sunset: warm orange/gold tones, long soft shadows, sun at 15-20 degrees, magical quality.' },
+    { label: 'Blue Hour', prompt: 'Change lighting to blue hour twilight: soft blue ambient light, city lights beginning to glow, calm atmospheric mood.' },
+    { label: 'Key Light (Left)', prompt: 'Apply strong key light from the left side at 45 degrees. Create dramatic shadows on right side of subject.' },
+    { label: 'Key Light (Right)', prompt: 'Apply strong key light from the right side at 45 degrees. Create dramatic shadows on left side of subject.' },
+    { label: 'Rim Light', prompt: 'Add bright rim/edge lighting from behind. Create glowing outline around subject, separate from background.' },
+    { label: 'Top Light', prompt: 'Apply overhead top lighting. Create strong shadows under features, dramatic theatrical effect.' },
+    { label: 'Under Light', prompt: 'Apply uplighting from below. Create eerie, horror-style shadows under features.' },
+    { label: 'Soft Diffused', prompt: 'Change to soft, diffused lighting: no harsh shadows, even illumination, cloudy day quality.' },
+    { label: 'High Contrast', prompt: 'Apply high contrast lighting: bright highlights, deep blacks, minimal midtones, dramatic chiaroscuro.' },
+    { label: 'Neon Lighting', prompt: 'Add neon lighting: colored light sources (pink, cyan, purple), urban night atmosphere, color mixing on surfaces.' },
+    { label: 'Candlelight', prompt: 'Change to warm candlelight: flickering orange glow, soft shadows, intimate warm atmosphere.' },
+    { label: 'Studio Softbox', prompt: 'Apply professional studio softbox lighting: clean, even, commercial quality illumination.' },
+];
+
+// Keep basic quick actions that don't need dropdowns
+const QUICK_ACTIONS = [
     { label: 'Remove BG', prompt: 'Remove background, pure white background.' },
-    { label: 'Change Angle', prompt: 'Rotate the camera angle slightly to the right. Maintain strict subject consistency (identity, clothes, scars). Use spatial reasoning to reveal the side profile.' },
-    { label: 'Relight', prompt: 'Change lighting to Golden Hour sunset. Simulate realistic sun angle and long shadows. Keep geometry consistent.' },
     { label: 'Remove Crowd', prompt: 'Remove all people from the background. Reconstruct the empty scene behind them using architectural context.' },
     { label: 'Text Fix', prompt: 'Correct and sharpen any legible text in the image. Ensure typography matches the surface perspective.' },
     { label: '4K Upscale', prompt: 'STRICT UPSCALE ONLY. Increase resolution to 4K. CRITICAL: Preserve EXACTLY all colors, hair color, skin tone, beard color, eye color, clothing colors, and all visual details. Do NOT alter, reinterpret, or regenerate any content. Only add subtle sharpness and micro-texture detail. This is a technical upscale, not a creative edit.', resolution: '4K' },
@@ -72,6 +123,144 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
 
   // Coverage Modal State
   const [showCoverageModal, setShowCoverageModal] = useState(false);
+
+  // Dropdown Menu State
+  const [openDropdown, setOpenDropdown] = useState<'enhance' | 'style' | 'rotate' | 'lighting' | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  // Custom Style Presets State
+  const [customStyles, setCustomStyles] = useState<Array<{id: string, name: string, prompt: string}>>(() => {
+    try {
+      const saved = localStorage.getItem('design-agent-custom-styles');
+      console.log('[CustomStyles] Loading from localStorage:', saved);
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('[CustomStyles] Error loading from localStorage:', error);
+      return [];
+    }
+  });
+  const [showSaveStyleModal, setShowSaveStyleModal] = useState(false);
+  const [newStyleName, setNewStyleName] = useState('');
+  const [newStylePrompt, setNewStylePrompt] = useState('');
+  const [isExtractingStyle, setIsExtractingStyle] = useState(false);
+
+  // AI Style Extraction from current image
+  const extractStyleFromCurrentImage = async () => {
+    if (!currentImage?.url) {
+      showNotification('No image to extract style from');
+      return;
+    }
+
+    setIsExtractingStyle(true);
+    setShowSaveStyleModal(true);
+    setOpenDropdown(null);
+
+    try {
+      console.log('[CustomStyles] Extracting style from current image...');
+      const styleDescription = await extractStyleDNA(currentImage.url);
+      console.log('[CustomStyles] Extracted style:', styleDescription);
+      setNewStylePrompt(styleDescription);
+    } catch (error) {
+      console.error('[CustomStyles] Error extracting style:', error);
+      showNotification('Failed to extract style. Please try again.');
+      setShowSaveStyleModal(false);
+    } finally {
+      setIsExtractingStyle(false);
+    }
+  };
+
+  // Save a custom style
+  const saveCustomStyle = () => {
+    if (!newStyleName.trim() || !newStylePrompt.trim()) {
+      showNotification('Please provide both a name and style description');
+      return;
+    }
+
+    const newStyle = {
+      id: crypto.randomUUID(),
+      name: newStyleName.trim(),
+      prompt: newStylePrompt.trim()
+    };
+
+    console.log('[CustomStyles] Saving new style:', newStyle);
+
+    // Update state and save to localStorage immediately
+    const updatedStyles = [...customStyles, newStyle];
+    setCustomStyles(updatedStyles);
+
+    try {
+      localStorage.setItem('design-agent-custom-styles', JSON.stringify(updatedStyles));
+      console.log('[CustomStyles] Saved to localStorage:', updatedStyles);
+    } catch (error) {
+      console.error('[CustomStyles] Error saving to localStorage:', error);
+    }
+
+    // Reset modal state
+    setShowSaveStyleModal(false);
+    setNewStyleName('');
+    setNewStylePrompt('');
+    showNotification(`Style "${newStyle.name}" saved!`);
+  };
+
+  // Delete a custom style
+  const deleteCustomStyle = (styleId: string) => {
+    const updatedStyles = customStyles.filter(s => s.id !== styleId);
+    setCustomStyles(updatedStyles);
+
+    try {
+      localStorage.setItem('design-agent-custom-styles', JSON.stringify(updatedStyles));
+      console.log('[CustomStyles] Deleted style, updated localStorage:', updatedStyles);
+    } catch (error) {
+      console.error('[CustomStyles] Error saving to localStorage after delete:', error);
+    }
+  };
+
+  // Refs for dropdown buttons (for portal positioning)
+  const enhanceButtonRef = useRef<HTMLButtonElement>(null);
+  const styleButtonRef = useRef<HTMLButtonElement>(null);
+  const rotateButtonRef = useRef<HTMLButtonElement>(null);
+  const lightingButtonRef = useRef<HTMLButtonElement>(null);
+  const styleDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Helper to open dropdown with position calculation
+  const openDropdownWithPosition = (type: 'enhance' | 'style' | 'rotate' | 'lighting') => {
+    if (openDropdown === type) {
+      setOpenDropdown(null);
+      return;
+    }
+
+    const buttonRef = {
+      enhance: enhanceButtonRef,
+      style: styleButtonRef,
+      rotate: rotateButtonRef,
+      lighting: lightingButtonRef
+    }[type];
+
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8, // Position BELOW button with small gap
+        left: rect.left
+      });
+    }
+    setOpenDropdown(type);
+  };
+
+  // Force repaint when style dropdown opens (fixes browser paint optimization bug)
+  useEffect(() => {
+    if (openDropdown === 'style' && styleDropdownRef.current) {
+      // Double RAF to ensure DOM is fully painted
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (styleDropdownRef.current) {
+            void styleDropdownRef.current.offsetHeight;
+            styleDropdownRef.current.scrollTop = 1;
+            styleDropdownRef.current.scrollTop = 0;
+          }
+        });
+      });
+    }
+  }, [openDropdown]);
 
   // Critic State
   const [showCritic, setShowCritic] = useState(false);
@@ -523,9 +712,55 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
 
       if (onImageEdited) onImageEdited(newImage);
 
+      // Log successful edit to Production Journal
+      const logEntry: ProductionLogEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        projectId: currentProject.id,
+        stage: 'edit',
+        action: 'edit',
+        subject: textToUse.slice(0, 100),
+        prompt: textToUse,
+        references: {
+          characters: [],
+          locations: [],
+          products: [],
+          moodboard: false,
+          lookbook: useLookbook,
+          lightingRig: !!productionDesign?.lightingAnalysis,
+          cameraRig: !!productionDesign?.cameraRig,
+        },
+        outcome: 'success',
+        resultImageId: newImage.id,
+      };
+      db.saveProductionLogEntry(logEntry).catch(console.error);
+
     } catch (error) {
       console.error("Editing failed:", error);
       showNotification("Editing failed. Please try again.");
+
+      // Log failed edit to Production Journal
+      const logEntry: ProductionLogEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        projectId: currentProject.id,
+        stage: 'edit',
+        action: 'edit',
+        subject: textToUse.slice(0, 100),
+        prompt: textToUse,
+        references: {
+          characters: [],
+          locations: [],
+          products: [],
+          moodboard: false,
+          lookbook: useLookbook,
+          lightingRig: !!productionDesign?.lightingAnalysis,
+          cameraRig: !!productionDesign?.cameraRig,
+        },
+        outcome: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      };
+      db.saveProductionLogEntry(logEntry).catch(console.error);
     } finally {
       setIsEditing(false);
       setEditingPhase('');
@@ -1301,7 +1536,7 @@ CRITICAL REQUIREMENTS:
 
            {/* Quick Edits Row */}
            {currentImage && !isEditing && (
-             <div className="flex gap-3 px-6 pt-4 overflow-x-auto scrollbar-none justify-center items-center">
+             <div className="flex gap-3 px-6 pt-4 overflow-x-auto scrollbar-none justify-center items-center relative z-[60]">
                 {/* Non-destructive Mode Toggle */}
                 <button
                   onClick={() => setUseNonDestructive(!useNonDestructive)}
@@ -1353,31 +1588,363 @@ CRITICAL REQUIREMENTS:
                   </button>
                 )}
 
-                {QUICK_EDITS.map(edit => (
-                  <button 
-                    key={edit.label}
-                    onClick={() => handleEdit(edit.prompt, edit.resolution)}
+                {/* ENHANCE DROPDOWN */}
+                <div className="relative shrink-0">
+                  <button
+                    ref={enhanceButtonRef}
+                    onClick={() => openDropdownWithPosition('enhance')}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-full border transition-all backdrop-blur-sm ${
+                      openDropdown === 'enhance'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                        : 'bg-zinc-800/50 hover:bg-zinc-700 text-zinc-300 border-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Enhance
+                    <ChevronDown className={`w-3 h-3 transition-transform ${openDropdown === 'enhance' ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {/* STYLE DROPDOWN */}
+                <div className="relative shrink-0">
+                  <button
+                    ref={styleButtonRef}
+                    onClick={() => openDropdownWithPosition('style')}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-full border transition-all backdrop-blur-sm ${
+                      openDropdown === 'style'
+                        ? 'bg-violet-500/20 text-violet-300 border-violet-500/30'
+                        : 'bg-zinc-800/50 hover:bg-zinc-700 text-zinc-300 border-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <Palette className="w-3.5 h-3.5" />
+                    Style
+                    <ChevronDown className={`w-3 h-3 transition-transform ${openDropdown === 'style' ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {/* ROTATE DROPDOWN */}
+                <div className="relative shrink-0">
+                  <button
+                    ref={rotateButtonRef}
+                    onClick={() => openDropdownWithPosition('rotate')}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-full border transition-all backdrop-blur-sm ${
+                      openDropdown === 'rotate'
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                        : 'bg-zinc-800/50 hover:bg-zinc-700 text-zinc-300 border-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    Rotate
+                    <ChevronDown className={`w-3 h-3 transition-transform ${openDropdown === 'rotate' ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {/* LIGHTING DROPDOWN */}
+                <div className="relative shrink-0">
+                  <button
+                    ref={lightingButtonRef}
+                    onClick={() => openDropdownWithPosition('lighting')}
+                    className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-full border transition-all backdrop-blur-sm ${
+                      openDropdown === 'lighting'
+                        ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
+                        : 'bg-zinc-800/50 hover:bg-zinc-700 text-zinc-300 border-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    Lighting
+                    <ChevronDown className={`w-3 h-3 transition-transform ${openDropdown === 'lighting' ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {/* Divider */}
+                <div className="h-6 w-px bg-zinc-700 mx-1 shrink-0" />
+
+                {/* Quick Actions (remaining simple buttons) */}
+                {QUICK_ACTIONS.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={() => handleEdit(action.prompt, (action as any).resolution)}
                     className="shrink-0 px-4 py-2 bg-zinc-800/50 hover:bg-zinc-700 text-xs text-zinc-300 rounded-full border border-white/5 hover:border-white/20 transition-all font-medium backdrop-blur-sm"
                   >
-                    {edit.label}
+                    {action.label}
                   </button>
                 ))}
-                
+
                 {/* Match Reference Preset Drop Zone */}
-                <div 
+                <div
                     className="shrink-0 relative group px-4 py-2 bg-zinc-800/50 hover:bg-violet-900/20 text-xs text-zinc-300 hover:text-violet-300 rounded-full border border-white/5 hover:border-violet-500/30 transition-all font-medium backdrop-blur-sm cursor-pointer border-dashed"
                     onClick={() => styleInputRef.current?.click()}
                 >
-                    <span className="flex items-center gap-2"><Palette className="w-3 h-3" /> Match Style</span>
-                    <input 
-                        type="file" 
-                        ref={styleInputRef} 
-                        className="hidden" 
-                        accept="image/*" 
-                        onChange={(e) => handleStyleMatch(e.target.files)} 
+                    <span className="flex items-center gap-2"><Zap className="w-3 h-3" /> Match Style</span>
+                    <input
+                        type="file"
+                        ref={styleInputRef}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => handleStyleMatch(e.target.files)}
                     />
                 </div>
              </div>
+           )}
+
+           {/* Dropdown Menus - Rendered via Portal for proper z-index layering */}
+           {openDropdown && createPortal(
+             <>
+               {/* Click-outside overlay */}
+               <div
+                 className="fixed inset-0 z-[9998]"
+                 onClick={() => setOpenDropdown(null)}
+               />
+
+               {/* ENHANCE DROPDOWN MENU */}
+               {openDropdown === 'enhance' && (
+                 <div
+                   className="fixed w-48 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-150"
+                   style={{
+                     top: `${dropdownPosition.top}px`,
+                     left: `${dropdownPosition.left}px`
+                   }}
+                 >
+                   <div className="p-2 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase font-bold flex items-center gap-2">
+                     <Sun className="w-3 h-3" /> Enhance Options
+                   </div>
+                   <div className="max-h-64 overflow-y-auto">
+                     {ENHANCE_OPTIONS.map(opt => (
+                       <button
+                         key={opt.label}
+                         onClick={() => { handleEdit(opt.prompt); setOpenDropdown(null); }}
+                         className="w-full px-4 py-2.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors border-b border-zinc-800/50 last:border-0"
+                       >
+                         {opt.label}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               )}
+
+               {/* STYLE DROPDOWN MENU */}
+               {openDropdown === 'style' && (
+                 <div
+                   className="fixed w-56 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-150"
+                   style={{
+                     top: `${dropdownPosition.top}px`,
+                     left: `${dropdownPosition.left}px`
+                   }}
+                 >
+                   <div className="p-2 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase font-bold flex items-center gap-2">
+                     <Palette className="w-3 h-3" /> Style Transform
+                   </div>
+
+                   {/* AI Style Extraction Button */}
+                   <div className="p-2 border-b border-zinc-700">
+                     <button
+                       onClick={extractStyleFromCurrentImage}
+                       disabled={!currentImage || isExtractingStyle}
+                       className="w-full text-left px-3 py-2 text-xs text-violet-400 hover:bg-violet-500/10 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                     >
+                       <Sparkles className="w-3 h-3" />
+                       {isExtractingStyle ? 'Analyzing Style...' : 'Save Current Style (AI)'}
+                     </button>
+                   </div>
+
+                   {/* Scrollable container for ALL styles - always render both sections to avoid conditional render paint bug */}
+                   <div
+                     ref={styleDropdownRef}
+                     className="max-h-[400px] overflow-y-auto"
+                   >
+                     {/* Custom Styles Section - always rendered */}
+                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider px-4 py-1.5 bg-zinc-800/50 sticky top-0 z-10 border-b border-zinc-700">
+                       Your Custom Styles ({customStyles.length})
+                     </div>
+                     {customStyles.length > 0 ? (
+                       customStyles.map(style => (
+                         <div key={style.id} className="flex items-center group">
+                           <button
+                             onClick={() => { handleEdit(style.prompt); setOpenDropdown(null); }}
+                             className="flex-1 text-left px-4 py-2.5 text-xs text-violet-300 hover:bg-violet-500/20 hover:text-white transition-colors"
+                             title={style.prompt}
+                           >
+                             {style.name}
+                           </button>
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               deleteCustomStyle(style.id);
+                             }}
+                             className="p-2 text-red-400 hover:bg-red-500/20 transition-colors opacity-0 group-hover:opacity-100"
+                             title="Delete style"
+                           >
+                             <X className="w-3 h-3" />
+                           </button>
+                         </div>
+                       ))
+                     ) : (
+                       <div className="px-4 py-2 text-xs text-zinc-600 italic">
+                         No custom styles yet
+                       </div>
+                     )}
+
+                     {/* Built-in Styles Section */}
+                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider px-4 py-1.5 bg-zinc-800/50 sticky top-0 z-10 border-b border-zinc-700">
+                       Built-in Styles
+                     </div>
+                     {STYLE_OPTIONS.map(opt => (
+                       <button
+                         key={opt.label}
+                         onClick={() => { handleEdit(opt.prompt); setOpenDropdown(null); }}
+                         className="w-full px-4 py-2.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors border-b border-zinc-800/50 last:border-0"
+                       >
+                         {opt.label}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               )}
+
+               {/* ROTATE DROPDOWN MENU */}
+               {openDropdown === 'rotate' && (
+                 <div
+                   className="fixed w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-150"
+                   style={{
+                     top: `${dropdownPosition.top}px`,
+                     left: `${dropdownPosition.left}px`
+                   }}
+                 >
+                   <div className="p-2 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase font-bold flex items-center gap-2">
+                     <RotateCw className="w-3 h-3" /> Camera Angle
+                   </div>
+                   <div className="max-h-64 overflow-y-auto">
+                     {ROTATE_OPTIONS.map(opt => (
+                       <button
+                         key={opt.label}
+                         onClick={() => { handleEdit(opt.prompt); setOpenDropdown(null); }}
+                         className="w-full px-4 py-2.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors border-b border-zinc-800/50 last:border-0"
+                       >
+                         {opt.label}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               )}
+
+               {/* LIGHTING DROPDOWN MENU */}
+               {openDropdown === 'lighting' && (
+                 <div
+                   className="fixed w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-150"
+                   style={{
+                     top: `${dropdownPosition.top}px`,
+                     left: `${dropdownPosition.left}px`
+                   }}
+                 >
+                   <div className="p-2 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase font-bold flex items-center gap-2">
+                     <Lightbulb className="w-3 h-3" /> Lighting Setup
+                   </div>
+                   <div className="max-h-64 overflow-y-auto">
+                     {LIGHTING_OPTIONS.map(opt => (
+                       <button
+                         key={opt.label}
+                         onClick={() => { handleEdit(opt.prompt); setOpenDropdown(null); }}
+                         className="w-full px-4 py-2.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors border-b border-zinc-800/50 last:border-0"
+                       >
+                         {opt.label}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               )}
+             </>,
+             document.body
+           )}
+
+           {/* Save Custom Style Modal */}
+           {showSaveStyleModal && createPortal(
+             <div className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+                 <div className="flex items-center justify-between mb-4">
+                   <h3 className="text-white font-bold flex items-center gap-2">
+                     <Sparkles className="w-5 h-5 text-violet-400" />
+                     Save Custom Style
+                   </h3>
+                   <button
+                     onClick={() => {
+                       setShowSaveStyleModal(false);
+                       setNewStyleName('');
+                       setNewStylePrompt('');
+                     }}
+                     className="text-zinc-500 hover:text-white transition-colors"
+                   >
+                     <X className="w-5 h-5" />
+                   </button>
+                 </div>
+
+                 <p className="text-xs text-zinc-400 mb-4">
+                   {isExtractingStyle
+                     ? 'AI is analyzing your image style...'
+                     : 'Name this style to save it for future use.'}
+                 </p>
+
+                 <label className="block mb-3">
+                   <span className="text-xs text-zinc-400 mb-1.5 block">Style Name</span>
+                   <input
+                     type="text"
+                     value={newStyleName}
+                     onChange={(e) => setNewStyleName(e.target.value)}
+                     placeholder="e.g., 'Golden Hour Portrait', 'Neon Cyberpunk'"
+                     className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                     autoFocus={!isExtractingStyle}
+                   />
+                 </label>
+
+                 <label className="block mb-5">
+                   <span className="text-xs text-zinc-400 mb-1.5 block flex items-center gap-2">
+                     AI-Extracted Style Description
+                     {isExtractingStyle && <Loader2 className="w-3 h-3 animate-spin text-violet-400" />}
+                   </span>
+                   {isExtractingStyle ? (
+                     <div className="w-full bg-zinc-800 border border-violet-500/30 rounded-lg px-3 py-4 text-sm text-zinc-400 h-28 flex items-center justify-center">
+                       <div className="flex flex-col items-center gap-2">
+                         <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+                         <span className="text-xs">Analyzing image style...</span>
+                       </div>
+                     </div>
+                   ) : (
+                     <textarea
+                       value={newStylePrompt}
+                       onChange={(e) => setNewStylePrompt(e.target.value)}
+                       placeholder="Style description will appear here after AI analysis..."
+                       className="w-full bg-zinc-800 border border-violet-500/30 rounded-lg px-3 py-2.5 text-sm text-zinc-300 h-28 resize-none focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                       readOnly={false}
+                     />
+                   )}
+                   <span className="text-[10px] text-violet-400 mt-1 block flex items-center gap-1">
+                     <Sparkles className="w-3 h-3" />
+                     Auto-generated by AI from your current image
+                   </span>
+                 </label>
+
+                 <div className="flex gap-2">
+                   <button
+                     onClick={saveCustomStyle}
+                     disabled={!newStyleName.trim() || !newStylePrompt.trim() || isExtractingStyle}
+                     className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                   >
+                     <Save className="w-4 h-4" />
+                     Save Style
+                   </button>
+                   <button
+                     onClick={() => {
+                       setShowSaveStyleModal(false);
+                       setNewStyleName('');
+                       setNewStylePrompt('');
+                     }}
+                     className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm transition-colors"
+                   >
+                     Cancel
+                   </button>
+                 </div>
+               </div>
+             </div>,
+             document.body
            )}
 
            {isDragging && (

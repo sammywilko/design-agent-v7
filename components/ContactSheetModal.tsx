@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle, ImagePlus, Palette, Trash2, Plus, BookOpen, RefreshCw } from 'lucide-react';
+import { X, Grid, Loader2, Download, CheckCircle, XCircle, Camera, MessageSquare, Zap, Film, Lock, Unlock, User, MapPin, Package, AlertTriangle, ImagePlus, Palette, Trash2, Plus, BookOpen, RefreshCw, Maximize2, BookText, ChevronDown, Sparkles, Video } from 'lucide-react';
 import {
   generateContactSheet,
   generateCoveragePack,
   generateCinematic9ShotSheet,
+  generateImage,
   ContactSheetResult,
   CinematicContactSheetResult,
   CONTACT_SHEET_12,
@@ -12,7 +13,9 @@ import {
   CINEMATIC_9_SHOT_GRID,
   ContentStylePreset,
   EntityLock,
-  QCStatus
+  QCStatus,
+  CinematicShotSpec,
+  STYLE_MODIFIERS
 } from '../services/gemini';
 import { ReferenceAsset, GenerationConfig, GeneratedImage, CharacterProfile, LocationProfile, ProductProfile } from '../types';
 import JSZip from 'jszip';
@@ -34,7 +37,7 @@ interface ContactSheetModalProps {
   onUseAsReference?: (image: GeneratedImage) => void;
 }
 
-type GeneratorMode = 'cinematic-9' | 'contact-sheet' | 'dialogue' | 'action';
+type GeneratorMode = 'cinematic-9' | 'story-driven' | 'contact-sheet' | 'dialogue' | 'action';
 
 const STYLE_PRESETS: { id: ContentStylePreset; label: string; description: string; color: string }[] = [
   { id: 'documentary', label: 'Documentary', description: 'Natural, authentic, observational', color: 'amber' },
@@ -42,6 +45,76 @@ const STYLE_PRESETS: { id: ContentStylePreset; label: string; description: strin
   { id: 'narrative', label: 'Narrative', description: 'Story-driven, emotional, cinematic', color: 'violet' },
   { id: 'fashion', label: 'Fashion', description: 'Aspirational, editorial, beautiful', color: 'pink' },
   { id: 'music-video', label: 'Music Video', description: 'Bold, energetic, iconic', color: 'emerald' }
+];
+
+// Cinematic Templates - Pre-built prompt structures for common shot types
+const CINEMATIC_TEMPLATES = [
+  {
+    id: 'character-intro',
+    name: 'Character Introduction',
+    icon: User,
+    description: 'Establish a character with hero shots',
+    subjectTemplate: '{character_name}, {character_traits}, {wardrobe}',
+    sceneTemplate: '{location} with {lighting_mood}',
+    suggestedStyle: 'narrative' as ContentStylePreset
+  },
+  {
+    id: 'product-hero',
+    name: 'Product Hero Shots',
+    icon: Package,
+    description: 'Showcase a product from all angles',
+    subjectTemplate: '{product_name}, {material_finish}, {key_features}',
+    sceneTemplate: '{surface/background} with {lighting_style}, {props}',
+    suggestedStyle: 'commercial' as ContentStylePreset
+  },
+  {
+    id: 'location-scout',
+    name: 'Location Scout',
+    icon: MapPin,
+    description: 'Explore a location cinematically',
+    subjectTemplate: '{location_name}, {architectural_style}, {atmosphere}',
+    sceneTemplate: '{time_of_day}, {weather}, {activity}',
+    suggestedStyle: 'documentary' as ContentStylePreset
+  },
+  {
+    id: 'action-sequence',
+    name: 'Action Sequence',
+    icon: Zap,
+    description: 'Dynamic action coverage',
+    subjectTemplate: '{character} performing {action}, {costume}, {props}',
+    sceneTemplate: '{environment}, {lighting}, high energy',
+    suggestedStyle: 'music-video' as ContentStylePreset
+  },
+  {
+    id: 'fashion-editorial',
+    name: 'Fashion Editorial',
+    icon: Sparkles,
+    description: 'High-fashion lookbook style',
+    subjectTemplate: '{model_description} wearing {outfit}, {pose}',
+    sceneTemplate: '{backdrop}, {lighting_setup}, editorial mood',
+    suggestedStyle: 'fashion' as ContentStylePreset
+  }
+];
+
+// Story-Driven Shot Breakdown - maps narrative beats to shot types
+interface StoryShot {
+  id: string;
+  narrativePurpose: string;
+  shotType: string;
+  emotionalBeat: string;
+  description: string;
+}
+
+const STORY_SHOT_SEQUENCE: StoryShot[] = [
+  { id: '1', narrativePurpose: 'World Building', shotType: 'ELS', emotionalBeat: 'Wonder/Scale', description: 'Establish the world and context' },
+  { id: '2', narrativePurpose: 'Character Entry', shotType: 'LS', emotionalBeat: 'Introduction', description: 'First glimpse of protagonist' },
+  { id: '3', narrativePurpose: 'Status Quo', shotType: 'MLS', emotionalBeat: 'Normalcy', description: 'Character in their element' },
+  { id: '4', narrativePurpose: 'Connection', shotType: 'MS', emotionalBeat: 'Engagement', description: 'Draw viewer closer' },
+  { id: '5', narrativePurpose: 'Inciting Moment', shotType: 'MCU', emotionalBeat: 'Tension/Shift', description: 'Something changes' },
+  { id: '6', narrativePurpose: 'Emotional Peak', shotType: 'CU', emotionalBeat: 'Intensity', description: 'Maximum emotional impact' },
+  { id: '7', narrativePurpose: 'Key Detail', shotType: 'ECU', emotionalBeat: 'Focus', description: 'Critical story element' },
+  { id: '8', narrativePurpose: 'Power Shift', shotType: 'LOW', emotionalBeat: 'Triumph/Dominance', description: 'Hero rises or antagonist looms' },
+  { id: '9', narrativePurpose: 'Resolution', shotType: 'HIGH', emotionalBeat: 'Reflection', description: 'Overview of new status quo' }
 ];
 
 const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
@@ -77,6 +150,18 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
   const [styleFromReference, setStyleFromReference] = useState(true);
   const [charactersFromReference, setCharactersFromReference] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Story-Driven mode state
+  const [storySynopsis, setStorySynopsis] = useState('');
+  const [storyCharacter, setStoryCharacter] = useState('');
+
+  // Cinematic Templates state
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+
+  // Extract Frame state
+  const [extractingShot, setExtractingShot] = useState<number | null>(null);
+  const [extractedFrames, setExtractedFrames] = useState<Map<number, GeneratedImage>>(new Map());
 
   if (!isOpen) return null;
 
@@ -161,8 +246,84 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
     }
   };
 
+  // Handle template selection
+  const handleSelectTemplate = (templateId: string) => {
+    const template = CINEMATIC_TEMPLATES.find(t => t.id === templateId);
+    if (template) {
+      setSelectedTemplate(templateId);
+      setStylePreset(template.suggestedStyle);
+      setSubjectDescription(template.subjectTemplate);
+      setSceneContext(template.sceneTemplate);
+      setShowTemplateDropdown(false);
+    }
+  };
+
+  // Extract Individual Frame - generate full-resolution standalone image from a shot
+  const handleExtractFrame = async (shotIdx: number, shotSpec: CinematicShotSpec, originalPrompt?: string) => {
+    if (extractingShot !== null) return; // Already extracting
+
+    setExtractingShot(shotIdx);
+
+    try {
+      // Build enhanced references including the reference image if provided
+      let enhancedRefs = [...references];
+      if (referenceImage) {
+        enhancedRefs = [
+          {
+            id: 'style-reference',
+            data: referenceImage,
+            type: 'Style' as const,
+            name: 'MASTER REFERENCE - Match This Exactly',
+            styleDescription: 'Match this reference image style and characters exactly.'
+          },
+          ...enhancedRefs
+        ];
+      }
+
+      // Use the original prompt if available, or build a new one
+      const extractPrompt = originalPrompt || `CINEMATIC FILM STILL. ${shotSpec.promptTemplate
+        .replace('{subject}', subjectDescription)
+        .replace('{environment}', sceneContext)}
+
+STYLE: ${stylePreset.toUpperCase()}
+LIGHTING: ${STYLE_MODIFIERS[stylePreset].lighting}
+MOOD: ${STYLE_MODIFIERS[stylePreset].mood}
+COLOR: ${STYLE_MODIFIERS[stylePreset].colorGrade}
+
+SCENE: ${sceneContext}
+
+HIGH RESOLUTION EXTRACTION: Generate this as a standalone hero image with maximum detail and quality.
+Photorealistic 4K cinematic quality. Film grain. Professional cinematography.`;
+
+      const extractedImage = await generateImage(extractPrompt, enhancedRefs, config, false);
+
+      setExtractedFrames(prev => new Map(prev).set(shotIdx, extractedImage));
+      showNotification(`Extracted ${shotSpec.label} as high-res frame`);
+
+      // Optionally add to generated images callback
+      if (onImagesGenerated) {
+        onImagesGenerated([extractedImage]);
+      }
+    } catch (error) {
+      console.error('Frame extraction failed:', error);
+      showNotification('Failed to extract frame');
+    } finally {
+      setExtractingShot(null);
+    }
+  };
+
   const handleGenerate = async () => {
-    if (!subjectDescription.trim()) {
+    // Validation based on mode
+    if (mode === 'story-driven') {
+      if (!storySynopsis.trim()) {
+        showNotification('Please enter a story synopsis');
+        return;
+      }
+      if (!storyCharacter.trim()) {
+        showNotification('Please enter a character description');
+        return;
+      }
+    } else if (!subjectDescription.trim()) {
       showNotification('Please enter a subject description');
       return;
     }
@@ -170,8 +331,9 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
     setIsGenerating(true);
     setResult(null);
     setCinematicResult(null);
+    setExtractedFrames(new Map()); // Clear previous extractions
 
-    const totalShots = mode === 'cinematic-9' ? 9 : mode === 'contact-sheet' ? 12 : 5;
+    const totalShots = mode === 'cinematic-9' || mode === 'story-driven' ? 9 : mode === 'contact-sheet' ? 12 : 5;
     setProgress({ completed: 0, total: totalShots, current: 'Starting...' });
 
     try {
@@ -213,17 +375,40 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
         ? `${subjectDescription}\n\n[STYLE LOCK INSTRUCTIONS: ${styleInstructions}]`
         : subjectDescription;
 
-      if (mode === 'cinematic-9') {
+      if (mode === 'cinematic-9' || mode === 'story-driven') {
         const entityLocks = buildEntityLocks();
+
+        // For story-driven mode, build narrative-enhanced prompts
+        let storySubject = enhancedSubject;
+        let storyScene = sceneContext;
+
+        if (mode === 'story-driven') {
+          // Build story-enhanced subject that includes narrative context
+          storySubject = `${storyCharacter}
+
+STORY CONTEXT: ${storySynopsis}
+
+NARRATIVE DIRECTION: Each shot in this sequence tells part of this story. Maintain emotional continuity and visual consistency throughout.
+
+[STYLE LOCK INSTRUCTIONS: ${styleInstructions}]`;
+          storyScene = `Cinematic scene that serves the story: "${storySynopsis.slice(0, 100)}..."`;
+        }
+
         const cinematicRes = await generateCinematic9ShotSheet(
-          enhancedSubject,
-          sceneContext,
+          storySubject,
+          storyScene,
           stylePreset,
           entityLocks,
           enhancedRefs,
           config,
           (completed, total, current) => {
-            setProgress({ completed, total, current });
+            // For story mode, show narrative purpose instead of just shot type
+            if (mode === 'story-driven' && STORY_SHOT_SEQUENCE[completed - 1]) {
+              const storyShot = STORY_SHOT_SEQUENCE[completed - 1];
+              setProgress({ completed, total, current: `${storyShot.narrativePurpose}: ${current}` });
+            } else {
+              setProgress({ completed, total, current });
+            }
           }
         );
         setCinematicResult(cinematicRes);
@@ -237,7 +422,8 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
           onImagesGenerated(successfulImages);
         }
 
-        showNotification(`Generated ${cinematicRes.successCount}/${cinematicRes.totalCount} cinematic shots`);
+        const modeLabel = mode === 'story-driven' ? 'story' : 'cinematic';
+        showNotification(`Generated ${cinematicRes.successCount}/${cinematicRes.totalCount} ${modeLabel} shots`);
       } else {
         let contactResult: ContactSheetResult;
 
@@ -320,12 +506,16 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
     switch (mode) {
       case 'cinematic-9':
         return { shots: CINEMATIC_9_SHOT_GRID, label: 'Cinematic 9-Shot Grid', icon: Film, color: 'violet', count: 9 };
+      case 'story-driven':
+        return { shots: CINEMATIC_9_SHOT_GRID, label: 'Story-Driven 9-Shot', icon: BookText, color: 'amber', count: 9 };
       case 'contact-sheet':
         return { shots: CONTACT_SHEET_12, label: '12-Shot Contact Sheet', icon: Grid, color: 'blue', count: 12 };
       case 'dialogue':
         return { shots: COVERAGE_PACK_DIALOGUE, label: 'Dialogue Coverage', icon: MessageSquare, color: 'cyan', count: 5 };
       case 'action':
         return { shots: COVERAGE_PACK_ACTION, label: 'Action Coverage', icon: Zap, color: 'orange', count: 5 };
+      default:
+        return { shots: CINEMATIC_9_SHOT_GRID, label: 'Cinematic 9-Shot Grid', icon: Film, color: 'violet', count: 9 };
     }
   };
 
@@ -368,16 +558,21 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
         <div className="p-4 border-b border-zinc-800 flex gap-2 flex-wrap">
           {[
             { id: 'cinematic-9' as GeneratorMode, label: 'Cinematic 9-Shot', icon: Film, shots: 9, featured: true },
+            { id: 'story-driven' as GeneratorMode, label: 'Story Mode', icon: BookText, shots: 9, featured: true, color: 'amber' },
             { id: 'contact-sheet' as GeneratorMode, label: '12-Shot Grid', icon: Grid, shots: 12 },
             { id: 'dialogue' as GeneratorMode, label: 'Dialogue Pack', icon: MessageSquare, shots: 5 },
             { id: 'action' as GeneratorMode, label: 'Action Pack', icon: Zap, shots: 5 }
           ].map(m => (
             <button
               key={m.id}
-              onClick={() => { setMode(m.id); setResult(null); setCinematicResult(null); }}
+              onClick={() => { setMode(m.id); setResult(null); setCinematicResult(null); setExtractedFrames(new Map()); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 mode === m.id
-                  ? m.featured ? 'bg-violet-600 text-white ring-2 ring-violet-400' : 'bg-violet-600 text-white'
+                  ? m.featured
+                    ? m.color === 'amber'
+                      ? 'bg-amber-600 text-white ring-2 ring-amber-400'
+                      : 'bg-violet-600 text-white ring-2 ring-violet-400'
+                    : 'bg-violet-600 text-white'
                   : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
               }`}
             >
@@ -392,8 +587,51 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           {!result && !cinematicResult ? (
             <div className="space-y-6">
-              {/* Style Presets - only for cinematic mode */}
+              {/* Cinematic Templates Dropdown - only for cinematic-9 mode */}
               {mode === 'cinematic-9' && (
+                <div className="relative">
+                  <h3 className="text-sm font-bold text-zinc-400 uppercase mb-3 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Quick Templates
+                  </h3>
+                  <button
+                    onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 flex items-center justify-between text-sm hover:bg-zinc-750 transition-colors"
+                  >
+                    <span className="text-zinc-300">
+                      {selectedTemplate
+                        ? CINEMATIC_TEMPLATES.find(t => t.id === selectedTemplate)?.name
+                        : 'Choose a template to get started...'}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${showTemplateDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showTemplateDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-10 overflow-hidden">
+                      {CINEMATIC_TEMPLATES.map(template => (
+                        <button
+                          key={template.id}
+                          onClick={() => handleSelectTemplate(template.id)}
+                          className={`w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-zinc-700 transition-colors ${
+                            selectedTemplate === template.id ? 'bg-violet-600/20 border-l-2 border-violet-500' : ''
+                          }`}
+                        >
+                          <template.icon className="w-5 h-5 text-violet-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-white">{template.name}</div>
+                            <div className="text-xs text-zinc-500 truncate">{template.description}</div>
+                          </div>
+                          <span className="text-[10px] px-2 py-0.5 bg-zinc-700 text-zinc-400 rounded capitalize">
+                            {template.suggestedStyle}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Style Presets - for cinematic and story modes */}
+              {(mode === 'cinematic-9' || mode === 'story-driven') && (
                 <div>
                   <h3 className="text-sm font-bold text-zinc-400 uppercase mb-3">Style Preset</h3>
                   <div className="flex gap-2 flex-wrap">
@@ -424,6 +662,39 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   <p className="text-xs text-zinc-500 mt-2">
                     {STYLE_PRESETS.find(p => p.id === stylePreset)?.description}
                   </p>
+                </div>
+              )}
+
+              {/* Story-Driven Mode Inputs */}
+              {mode === 'story-driven' && (
+                <div className="bg-amber-950/20 border border-amber-600/30 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <BookText className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-sm font-bold text-amber-300">Tell Your Story</h3>
+                  </div>
+                  <p className="text-xs text-amber-200/70 mb-4">
+                    Input your story and character. The AI will generate 9 shots that progress through the narrative arc.
+                  </p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-amber-400 uppercase mb-1 block">Story Synopsis</label>
+                      <textarea
+                        value={storySynopsis}
+                        onChange={(e) => setStorySynopsis(e.target.value)}
+                        placeholder="e.g., A lonely astronaut discovers signs of life on a desolate moon. Hope turns to fear as she realizes she's not alone..."
+                        className="w-full bg-zinc-950 border border-amber-700/50 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-24 resize-none focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-amber-400 uppercase mb-1 block">Main Character</label>
+                      <textarea
+                        value={storyCharacter}
+                        onChange={(e) => setStoryCharacter(e.target.value)}
+                        placeholder="e.g., Female astronaut, mid-30s, weathered space suit, determined expression, short dark hair visible through helmet"
+                        className="w-full bg-zinc-950 border border-amber-700/50 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-20 resize-none focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -506,8 +777,8 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                 )}
               </div>
 
-              {/* Entity Locking - only for cinematic mode */}
-              {mode === 'cinematic-9' && hasEntities && (
+              {/* Entity Locking - for cinematic and story modes */}
+              {(mode === 'cinematic-9' || mode === 'story-driven') && hasEntities && (
                 <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-bold text-zinc-400 uppercase flex items-center gap-2">
@@ -605,9 +876,22 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
 
               {/* Shot Preview Grid */}
               <div>
-                <h3 className="text-sm font-bold text-zinc-400 uppercase mb-3">Shot List Preview</h3>
-                <div className={`grid gap-2 ${mode === 'cinematic-9' ? 'grid-cols-3' : mode === 'contact-sheet' ? 'grid-cols-4' : 'grid-cols-5'}`}>
-                  {mode === 'cinematic-9' ? (
+                <h3 className="text-sm font-bold text-zinc-400 uppercase mb-3">
+                  {mode === 'story-driven' ? 'Narrative Arc Preview' : 'Shot List Preview'}
+                </h3>
+                <div className={`grid gap-2 ${mode === 'cinematic-9' || mode === 'story-driven' ? 'grid-cols-3' : mode === 'contact-sheet' ? 'grid-cols-4' : 'grid-cols-5'}`}>
+                  {mode === 'story-driven' ? (
+                    STORY_SHOT_SEQUENCE.map((storyShot, idx) => (
+                      <div key={idx} className="bg-amber-950/20 border border-amber-700/30 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-mono bg-amber-700/50 text-amber-200 px-1.5 py-0.5 rounded">{storyShot.shotType}</span>
+                          <span className="text-[10px] text-amber-400">{storyShot.emotionalBeat}</span>
+                        </div>
+                        <div className="text-[10px] text-white font-medium">{storyShot.narrativePurpose}</div>
+                        <div className="text-[9px] text-amber-200/60 mt-1">{storyShot.description}</div>
+                      </div>
+                    ))
+                  ) : mode === 'cinematic-9' ? (
                     CINEMATIC_9_SHOT_GRID.map((shot, idx) => (
                       <div key={idx} className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
                         <div className="text-xs font-bold text-violet-400 mb-1">{shot.shotType}</div>
@@ -626,27 +910,29 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                 </div>
               </div>
 
-              {/* Inputs */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-bold text-zinc-400 uppercase mb-2 block">Subject Description</label>
-                  <textarea
-                    value={subjectDescription}
-                    onChange={(e) => setSubjectDescription(e.target.value)}
-                    placeholder="e.g., Cyberpunk courier with neon visor, tactical vest, rain-soaked aesthetic"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-32 resize-none focus:border-violet-500 outline-none"
-                  />
+              {/* Inputs - hide for story-driven mode (has its own inputs above) */}
+              {mode !== 'story-driven' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-bold text-zinc-400 uppercase mb-2 block">Subject Description</label>
+                    <textarea
+                      value={subjectDescription}
+                      onChange={(e) => setSubjectDescription(e.target.value)}
+                      placeholder="e.g., Cyberpunk courier with neon visor, tactical vest, rain-soaked aesthetic"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-32 resize-none focus:border-violet-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-bold text-zinc-400 uppercase mb-2 block">Scene Context</label>
+                    <textarea
+                      value={sceneContext}
+                      onChange={(e) => setSceneContext(e.target.value)}
+                      placeholder="e.g., Neon-lit alleyway, wet pavement reflecting lights, dystopian city"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-32 resize-none focus:border-violet-500 outline-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-sm font-bold text-zinc-400 uppercase mb-2 block">Scene Context</label>
-                  <textarea
-                    value={sceneContext}
-                    onChange={(e) => setSceneContext(e.target.value)}
-                    placeholder="e.g., Neon-lit alleyway, wet pavement reflecting lights, dystopian city"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white placeholder:text-zinc-600 h-32 resize-none focus:border-violet-500 outline-none"
-                  />
-                </div>
-              </div>
+              )}
 
               {/* Progress */}
               {isGenerating && (
@@ -668,8 +954,8 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
               {/* Generate Button */}
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating || !subjectDescription.trim()}
-                className="w-full py-4 bg-violet-600 hover:bg-violet-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                disabled={isGenerating || (mode === 'story-driven' ? (!storySynopsis.trim() || !storyCharacter.trim()) : !subjectDescription.trim())}
+                className={`w-full py-4 ${mode === 'story-driven' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-violet-600 hover:bg-violet-700'} disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2`}
               >
                 {isGenerating ? (
                   <>
@@ -678,7 +964,7 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <Camera className="w-5 h-5" />
+                    {mode === 'story-driven' ? <BookText className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
                     Generate {modeConfig.label}
                     {referenceImage && (
                       <span className="text-xs bg-emerald-500 px-2 py-0.5 rounded-full ml-2 flex items-center gap-1">
@@ -687,7 +973,7 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                       </span>
                     )}
                     {totalLocked > 0 && (
-                      <span className="text-xs bg-violet-500 px-2 py-0.5 rounded-full ml-2">
+                      <span className={`text-xs ${mode === 'story-driven' ? 'bg-amber-500' : 'bg-violet-500'} px-2 py-0.5 rounded-full ml-2`}>
                         {totalLocked} entities
                       </span>
                     )}
@@ -707,9 +993,9 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                       : result ? `${result.successCount}/${result.totalCount} shots generated` : ''
                     }
                   </span>
-                  {mode === 'cinematic-9' && (
-                    <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded capitalize">
-                      {stylePreset}
+                  {(mode === 'cinematic-9' || mode === 'story-driven') && (
+                    <span className={`text-xs ${mode === 'story-driven' ? 'bg-amber-700' : 'bg-zinc-700'} text-zinc-300 px-2 py-0.5 rounded capitalize`}>
+                      {mode === 'story-driven' ? 'Story Mode' : stylePreset}
                     </span>
                   )}
                 </div>
@@ -748,8 +1034,35 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                               alt={shot.spec.label}
                               className="w-full h-full object-cover"
                             />
+                            {/* Shot type overlay label - always visible */}
+                            <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-sm px-2 py-1 rounded-lg pointer-events-none">
+                              <span className={`text-[10px] font-bold ${mode === 'story-driven' ? 'text-amber-400' : 'text-violet-400'}`}>#{idx + 1}</span>
+                              <span className="text-[10px] text-white ml-1.5">{shot.spec.shotType}</span>
+                              {mode === 'story-driven' && STORY_SHOT_SEQUENCE[idx] && (
+                                <span className="text-[9px] text-amber-300 block">{STORY_SHOT_SEQUENCE[idx].narrativePurpose}</span>
+                              )}
+                            </div>
                             {/* Action buttons overlay */}
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 flex-wrap p-2">
+                              {/* Extract Frame Button - Generate high-res standalone */}
+                              <button
+                                onClick={() => handleExtractFrame(idx, shot.spec, shot.promptUsed)}
+                                disabled={extractingShot !== null}
+                                className={`p-2 rounded-lg text-white transition-colors ${
+                                  extractingShot === idx
+                                    ? 'bg-cyan-700 animate-pulse'
+                                    : extractedFrames.has(idx)
+                                    ? 'bg-cyan-600 ring-2 ring-cyan-400'
+                                    : 'bg-cyan-600 hover:bg-cyan-700'
+                                }`}
+                                title={extractedFrames.has(idx) ? 'Extracted!' : 'Extract High-Res Frame'}
+                              >
+                                {extractingShot === idx ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Maximize2 className="w-4 h-4" />
+                                )}
+                              </button>
                               {onAddToStoryboard && (
                                 <button
                                   onClick={() => onAddToStoryboard(shot.image!, shot.spec.shotType)}
@@ -786,6 +1099,13 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                                 <Download className="w-4 h-4" />
                               </a>
                             </div>
+                            {/* Extracted Frame Badge */}
+                            {extractedFrames.has(idx) && (
+                              <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-cyan-500 text-white text-[9px] font-bold rounded flex items-center gap-1">
+                                <Maximize2 className="w-2.5 h-2.5" />
+                                EXTRACTED
+                              </div>
+                            )}
                           </>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
@@ -802,10 +1122,22 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                         <div className="flex items-center gap-2 mb-1">
                           {shot.image && <CheckCircle className="w-3.5 h-3.5 text-green-500" />}
                           {shot.failed && <XCircle className="w-3.5 h-3.5 text-red-500" />}
-                          <span className="text-xs font-bold text-violet-400">{shot.spec.shotType}</span>
-                          <span className="text-xs text-zinc-300">{shot.spec.label}</span>
+                          <span className={`text-xs font-bold ${mode === 'story-driven' ? 'text-amber-400' : 'text-violet-400'}`}>
+                            {shot.spec.shotType}
+                          </span>
+                          {/* Show story narrative info for story-driven mode */}
+                          {mode === 'story-driven' && STORY_SHOT_SEQUENCE[idx] ? (
+                            <span className="text-xs text-amber-300">{STORY_SHOT_SEQUENCE[idx].narrativePurpose}</span>
+                          ) : (
+                            <span className="text-xs text-zinc-300">{shot.spec.label}</span>
+                          )}
                         </div>
-                        <div className="text-[10px] text-zinc-500">{shot.spec.purpose}</div>
+                        <div className="text-[10px] text-zinc-500">
+                          {mode === 'story-driven' && STORY_SHOT_SEQUENCE[idx]
+                            ? `${STORY_SHOT_SEQUENCE[idx].emotionalBeat} — ${STORY_SHOT_SEQUENCE[idx].description}`
+                            : shot.spec.purpose
+                          }
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -830,6 +1162,12 @@ const ContactSheetModal: React.FC<ContactSheetModalProps> = ({
                               alt={`${shot.type} ${shot.angle}`}
                               className="w-full h-full object-cover"
                             />
+                            {/* Shot type overlay label - always visible */}
+                            <div className="absolute top-1 left-1 bg-black/80 backdrop-blur-sm px-1.5 py-0.5 rounded pointer-events-none">
+                              <span className="text-[9px] font-bold text-blue-400">#{idx + 1}</span>
+                              <span className="text-[9px] text-white ml-1">{shot.type}</span>
+                              <span className="text-[8px] text-zinc-400 block">{shot.angle}</span>
+                            </div>
                             {/* Action buttons overlay */}
                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                               {onAddToStoryboard && (

@@ -1,14 +1,15 @@
 
 import React, { useState } from 'react';
-import { Project } from '../types';
-import { Plus, FolderOpen, Trash2, ArrowRight, LayoutGrid, LogIn, User, LogOut, Cloud, HardDrive } from 'lucide-react';
+import { Project, ProjectTemplate } from '../types';
+import { Plus, FolderOpen, Trash2, ArrowRight, LayoutGrid, LogIn, User, LogOut, Cloud, HardDrive, LayoutTemplate } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import AuthModal from './AuthModal';
+import TemplateSelector from './TemplateSelector';
 
 interface ProjectDashboardProps {
   projects: Project[];
   onSelect: (project: Project) => void;
-  onCreate: (name: string) => void;
+  onCreate: (name: string, template?: ProjectTemplate | null) => void;
   onDelete: (id: string) => void;
 }
 
@@ -16,15 +17,30 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
 
   const { isAuthenticated, isLoading: isAuthLoading, user, logout, isFirebaseAvailable } = useAuth();
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (newProjectName.trim()) {
-      onCreate(newProjectName);
+      onCreate(newProjectName, selectedTemplate);
       setNewProjectName('');
       setIsCreating(false);
+      setSelectedTemplate(null);
+    }
+  };
+
+  const handleTemplateSelect = (template: ProjectTemplate | null) => {
+    setSelectedTemplate(template);
+    setShowTemplateSelector(false);
+    setIsCreating(true);
+    // Pre-fill project name from template if selected
+    if (template && template.id !== 'template-blank') {
+      setNewProjectName(`${template.name} Project`);
+    } else {
+      setNewProjectName('');
     }
   };
 
@@ -32,6 +48,13 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
     <div className="flex flex-col h-full w-full bg-slate-950 text-white">
       {/* Auth Modal */}
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+
+      {/* Template Selector Modal */}
+      <TemplateSelector
+        isOpen={showTemplateSelector}
+        onClose={() => setShowTemplateSelector(false)}
+        onSelect={handleTemplateSelect}
+      />
 
       {/* Header with Auth */}
       <header className="h-14 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
@@ -110,9 +133,25 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
           <div className="bg-slate-900/50 border border-slate-800 border-dashed hover:border-violet-500/50 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[200px] transition-all group">
             {isCreating ? (
               <form onSubmit={handleCreate} className="w-full">
-                <input 
+                {/* Template indicator */}
+                {selectedTemplate && (
+                  <div className="mb-3 p-2 bg-violet-600/20 border border-violet-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-xl">{selectedTemplate.icon}</span>
+                      <span className="text-violet-300 font-medium">{selectedTemplate.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowTemplateSelector(true)}
+                        className="ml-auto text-xs text-violet-400 hover:text-violet-300 underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <input
                   autoFocus
-                  type="text" 
+                  type="text"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
                   placeholder="Project Name..."
@@ -120,16 +159,24 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, onSelect,
                 />
                 <div className="flex gap-2">
                   <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold py-2 rounded-lg">CREATE</button>
-                  <button type="button" onClick={() => setIsCreating(false)} className="px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg">CANCEL</button>
+                  <button type="button" onClick={() => { setIsCreating(false); setSelectedTemplate(null); }} className="px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg">CANCEL</button>
                 </div>
               </form>
             ) : (
-              <button onClick={() => setIsCreating(true)} className="flex flex-col items-center gap-3 text-slate-500 hover:text-violet-400">
-                <div className="p-4 bg-slate-800 rounded-full group-hover:bg-slate-800/80 transition-colors">
-                   <Plus className="w-8 h-8" />
-                </div>
-                <span className="font-medium">New Project</span>
-              </button>
+              <div className="flex flex-col items-center gap-4 w-full">
+                <button onClick={() => setShowTemplateSelector(true)} className="flex flex-col items-center gap-3 text-slate-500 hover:text-violet-400 w-full">
+                  <div className="p-4 bg-slate-800 rounded-full group-hover:bg-slate-800/80 transition-colors">
+                     <Plus className="w-8 h-8" />
+                  </div>
+                  <span className="font-medium">New Project</span>
+                </button>
+                <button
+                  onClick={() => { setSelectedTemplate(null); setIsCreating(true); }}
+                  className="text-xs text-slate-500 hover:text-slate-400 underline"
+                >
+                  or start blank
+                </button>
+              </div>
             )}
           </div>
 

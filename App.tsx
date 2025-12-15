@@ -14,6 +14,8 @@ import ProducerChat from './components/ProducerChat';
 import CollaborationPanel from './components/CollaborationPanel';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import DownloadModal from './components/DownloadModal';
+import TutorialModal, { shouldShowTutorial } from './components/TutorialModal';
+import ProductionJournal from './components/ProductionJournal';
 import ErrorBoundary from './components/ErrorBoundary';
 import AuthModal from './components/AuthModal';
 import UserMenu from './components/UserMenu';
@@ -21,8 +23,8 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ProducerAppContext } from './services/producerAgent';
 import { useCollaboration } from './hooks/useCollaboration';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage, ReferenceAsset, ReferenceType } from './types';
-import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2, Keyboard } from 'lucide-react';
+import { AppStage, GeneratedImage, SavedEntity, Project, ScriptData, Beat, CharacterProfile, LocationProfile, ProductProfile, MoodBoard, MoodBoardImage, ReferenceAsset, ReferenceType, ProducerContext, ProjectTemplate } from './types';
+import { Palette, Layers, Sparkles, Film, ArrowLeft, Bot, Loader2, Video, DownloadCloud, HelpCircle, FileText, FileSpreadsheet, LayoutDashboard, ImageIcon, Undo2, Keyboard, BookOpen } from 'lucide-react';
 import { db } from './services/db';
 import * as storage from './services/storage';
 import { generateCharacterSheet, generateExpressionBank, generateImage } from './services/gemini';
@@ -76,6 +78,20 @@ const App: React.FC = () => {
   const [showWelcomeGuide, setShowWelcomeGuide] = useState(false);
   const [showPipelineOverview, setShowPipelineOverview] = useState(false);
 
+  // Mobile detection for responsive FAB
+  const [isMobileView, setIsMobileView] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768
+  );
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobileView(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   const [globalHistory, setGlobalHistory] = useState<GeneratedImage[]>([]);
   const [libraryAssets, setLibraryAssets] = useState<SavedEntity[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -97,6 +113,12 @@ const App: React.FC = () => {
   // Auth Modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  // Tutorial Modal
+  const [showTutorialModal, setShowTutorialModal] = useState(false);
+
+  // Production Journal Modal
+  const [showJournalModal, setShowJournalModal] = useState(false);
+
   // Undo System for Agent Actions
   const [scriptHistory, setScriptHistory] = useState<ScriptData[]>([]);
   const MAX_UNDO_HISTORY = 20;
@@ -116,7 +138,7 @@ const App: React.FC = () => {
     setStage,
     toggleAssistant: useCallback(() => setIsAssistantOpen(prev => !prev), []),
     toggleMoodBoard: useCallback(() => setShowMoodBoardPanel(prev => !prev), []),
-    onShowHelp: useCallback(() => setShowShortcutsModal(true), []),
+    onShowHelp: useCallback(() => setShowTutorialModal(true), []), // Show tutorial on ? key
   });
 
   // Load projects when auth state changes
@@ -187,9 +209,9 @@ const App: React.FC = () => {
       loadData();
       setStage(AppStage.STAGE_0_SCRIPT); // Start at Script Studio
 
-      const hasSeenGuide = localStorage.getItem('hasSeenWelcomeGuideV4');
-      if (!hasSeenGuide) {
-          setShowWelcomeGuide(true);
+      // Show tutorial on first visit (comprehensive guide)
+      if (shouldShowTutorial()) {
+          setShowTutorialModal(true);
       }
     }
   }, [currentProject]);
@@ -199,11 +221,56 @@ const App: React.FC = () => {
       localStorage.setItem('hasSeenWelcomeGuideV4', 'true');
   };
 
-  const createProject = async (name: string) => {
+  const createProject = async (name: string, template?: ProjectTemplate | null) => {
     // Use hybrid storage - saves to Firestore if authenticated, IndexedDB if not
     const newProject = await storage.createProject(name);
     setProjects(prev => [newProject, ...prev]);
     setCurrentProject(newProject);
+
+    // If a template was selected, pre-populate the World Bible
+    if (template && template.id !== 'template-blank') {
+      // Pre-populate characters from template
+      const templateCharacters: CharacterProfile[] = template.worldBible.suggestedCharacters.map((char, idx) => ({
+        id: `template-char-${idx}-${Date.now()}`,
+        name: char.name,
+        description: char.description,
+        imageRefs: [],
+        promptSnippet: char.placeholder ? undefined : char.description,
+        isLocked: false
+      }));
+
+      // Pre-populate locations from template
+      const templateLocations: LocationProfile[] = template.worldBible.suggestedLocations.map((loc, idx) => ({
+        id: `template-loc-${idx}-${Date.now()}`,
+        name: loc.name,
+        description: loc.description,
+        imageRefs: [],
+        promptSnippet: loc.placeholder ? undefined : loc.description
+      }));
+
+      // Pre-populate products from template
+      const templateProducts: ProductProfile[] = template.worldBible.suggestedProducts.map((prod, idx) => ({
+        id: `template-prod-${idx}-${Date.now()}`,
+        name: prod.name,
+        description: prod.description,
+        imageRefs: [],
+        promptSnippet: prod.placeholder ? undefined : prod.description
+      }));
+
+      // Save to database
+      for (const char of templateCharacters) {
+        await db.saveCharacter(newProject.id, char);
+      }
+      for (const loc of templateLocations) {
+        await db.saveLocation(newProject.id, loc);
+      }
+      for (const prod of templateProducts) {
+        await db.saveProduct(newProject.id, prod);
+      }
+
+      // Update local state (will be loaded when project data loads)
+      showToast(`Project created with ${template.name} template!`, 'success');
+    }
   };
 
   const deleteProject = async (id: string) => {
@@ -1410,6 +1477,84 @@ ${clips}
       showNotification
   };
 
+  // Build comprehensive context for the AI Producer
+  const studioAssistantContext: ProducerContext = {
+      currentStage: stage,
+      selectedImageId: workingImage?.id,
+
+      // Script & Narrative
+      script: scriptData ? {
+          content: scriptData.content || '',
+          beatCount: scriptData.beats?.length || 0,
+          beats: (scriptData.beats || []).map(b => ({
+              id: b.id,
+              visualSummary: b.visualSummary,
+              characters: b.characters || [],
+              locations: b.locations || [],
+              products: b.products || [],
+              status: b.status,
+              hasGeneratedImages: (b.generatedImageIds?.length || 0) > 0
+          }))
+      } : undefined,
+
+      // World Bible Assets
+      worldBible: {
+          characters: (scriptData?.characters || []).map(c => ({
+              name: c.name,
+              hasPromptSnippet: !!c.promptSnippet,
+              hasCharacterSheet: !!c.characterSheet,
+              hasExpressionBank: !!(c.expressionBank?.grid),
+              imageRefCount: c.imageRefs?.length || 0,
+              isLocked: !!c.isLocked
+          })),
+          locations: (scriptData?.locations || []).map(l => ({
+              name: l.name,
+              hasPromptSnippet: !!l.promptSnippet,
+              hasAnchorImage: !!l.anchorImage,
+              imageRefCount: l.imageRefs?.length || 0
+          })),
+          products: (scriptData?.products || []).map(p => ({
+              name: p.name,
+              hasPromptSnippet: !!p.promptSnippet,
+              imageRefCount: p.imageRefs?.length || 0
+          }))
+      },
+
+      // Production Design
+      productionDesign: {
+          hasLookbook: !!scriptData?.lookbook,
+          visualStyle: scriptData?.productionDesign?.visualStyle,
+          colorPalette: scriptData?.productionDesign?.colorPalette,
+          hasLightingRef: !!scriptData?.productionDesign?.lightingRef,
+          hasCameraRig: !!scriptData?.productionDesign?.cameraRig
+      },
+
+      // Generation History
+      generationHistory: {
+          totalImages: globalHistory.length,
+          recentGenerations: globalHistory.slice(-10).map(img => ({
+              prompt: img.prompt,
+              timestamp: img.generationContext?.timestamp || 0,
+              hadReferences: (img.generationContext?.referenceIds?.length || 0) > 0,
+              aspectRatio: img.aspectRatio
+          })),
+          failedGenerations: 0 // Could track this if needed
+      },
+
+      // Storyboard Status (from moodBoards/frames if available)
+      storyboard: {
+          frameCount: 0, // Would need storyboard frames state
+          completedFrames: 0,
+          hasStartEndPairs: 0
+      },
+
+      // Contact Sheet
+      contactSheet: {
+          imageCount: globalHistory.length,
+          referenceImageCount: libraryAssets.length
+      }
+  };
+
   if (isLoadingProjects) {
       return (
           <div className="h-screen w-screen bg-zinc-950 flex items-center justify-center">
@@ -1433,6 +1578,8 @@ ${clips}
     <div className="h-screen w-screen flex flex-col bg-zinc-950 overflow-hidden font-sans relative text-white">
       <WelcomeGuide isOpen={showWelcomeGuide} onClose={closeWelcomeGuide} />
       <KeyboardShortcutsModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <TutorialModal isOpen={showTutorialModal} onClose={() => setShowTutorialModal(false)} />
+      <ProductionJournal isOpen={showJournalModal} onClose={() => setShowJournalModal(false)} projectId={currentProject?.id || ''} />
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
       <DownloadModal
           isOpen={showDownloadModal}
@@ -1482,10 +1629,22 @@ ${clips}
           </div>
       )}
 
+      {/* Mobile Floating Action Button for The Producer */}
+      {isMobileView && !isAssistantOpen && (
+        <button
+          onClick={() => setIsAssistantOpen(true)}
+          className="fixed bottom-20 right-4 w-14 h-14 bg-gradient-to-br from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 rounded-full shadow-2xl shadow-violet-900/50 flex items-center justify-center z-40 transition-all active:scale-95 animate-in fade-in slide-in-from-bottom-4 duration-300"
+          title="Open The Producer"
+        >
+          <Bot className="w-6 h-6 text-white" />
+        </button>
+      )}
+
       <StudioAssistant
         isOpen={isAssistantOpen}
         onClose={() => setIsAssistantOpen(false)}
         currentStage={stage}
+        projectContext={studioAssistantContext}
       />
 
       {/* New Agentic Producer Chat */}
@@ -1495,73 +1654,76 @@ ${clips}
         onClose={() => setShowProducerChat(false)}
       />
 
-      <header className="h-16 bg-zinc-950/80 backdrop-blur-xl border-b border-white/5 flex items-center px-8 justify-between shrink-0 z-30">
-        <div className="flex items-center gap-6">
-            <button onClick={() => setCurrentProject(null)} className="text-zinc-500 hover:text-white transition-colors" title="Back to Projects">
+      <header className="h-14 md:h-16 bg-zinc-950/80 backdrop-blur-xl border-b border-white/5 flex items-center px-3 md:px-8 justify-between shrink-0 z-30">
+        <div className="flex items-center gap-2 md:gap-6">
+            <button onClick={() => setCurrentProject(null)} className="p-2 text-zinc-500 hover:text-white transition-colors" title="Back to Projects">
                 <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="h-6 w-px bg-white/5" />
-            <div className="flex items-center gap-3">
+            <div className="h-6 w-px bg-white/5 hidden md:block" />
+            <div className="flex items-center gap-2 md:gap-3">
                 <div className="bg-gradient-to-br from-violet-600 to-indigo-600 p-1.5 rounded-xl shadow-lg shadow-violet-900/20">
                     <Palette className="w-4 h-4 text-white" />
                 </div>
-                <h1 className="text-sm font-semibold text-white tracking-tight hidden sm:block">{currentProject.name}</h1>
-                <button onClick={() => setShowWelcomeGuide(true)} className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors"><HelpCircle className="w-4 h-4" /></button>
+                <h1 className="text-sm font-semibold text-white tracking-tight hidden md:block max-w-[120px] truncate">{currentProject.name}</h1>
+                <button onClick={() => setShowJournalModal(true)} className="p-2 text-zinc-600 hover:text-violet-400 transition-colors" title="Production Journal"><BookOpen className="w-4 h-4" /></button>
+                <button onClick={() => setShowTutorialModal(true)} className="p-2 text-zinc-600 hover:text-violet-400 transition-colors hidden sm:flex" title="Help & Tutorial (?)"><HelpCircle className="w-4 h-4" /></button>
             </div>
 
-            {/* Collaboration Status */}
-            <CollaborationPanel
-                mode={collaboration.mode}
-                projectId={collaboration.projectId}
-                shareUrl={collaboration.shareUrl}
-                syncStatus={collaboration.syncStatus}
-                lastSyncedAt={collaboration.lastSyncedAt}
-                lastEditedBy={collaboration.lastEditedBy}
-                isOwner={collaboration.isOwner}
-                error={collaboration.error}
-                isFirebaseAvailable={collaboration.isFirebaseAvailable}
-                onStartSharing={collaboration.startSharing}
-                onStopSharing={collaboration.stopSharing}
-                onSyncNow={collaboration.syncNow}
-            />
+            {/* Collaboration Status - hidden on mobile */}
+            <div className="hidden lg:block">
+                <CollaborationPanel
+                    mode={collaboration.mode}
+                    projectId={collaboration.projectId}
+                    shareUrl={collaboration.shareUrl}
+                    syncStatus={collaboration.syncStatus}
+                    lastSyncedAt={collaboration.lastSyncedAt}
+                    lastEditedBy={collaboration.lastEditedBy}
+                    isOwner={collaboration.isOwner}
+                    error={collaboration.error}
+                    isFirebaseAvailable={collaboration.isFirebaseAvailable}
+                    onStartSharing={collaboration.startSharing}
+                    onStopSharing={collaboration.stopSharing}
+                    onSyncNow={collaboration.syncNow}
+                />
+            </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex bg-zinc-900/50 p-1 rounded-xl border border-white/5 backdrop-blur-md absolute left-1/2 transform -translate-x-1/2 shadow-xl">
-            <button onClick={() => setStage(AppStage.STAGE_0_SCRIPT)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_0_SCRIPT ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
-                <FileText className="w-3.5 h-3.5" /> Script
+        {/* Navigation Tabs - responsive */}
+        <div className="flex bg-zinc-900/50 p-0.5 md:p-1 rounded-lg md:rounded-xl border border-white/5 backdrop-blur-md absolute left-1/2 transform -translate-x-1/2 shadow-xl">
+            <button onClick={() => setStage(AppStage.STAGE_0_SCRIPT)} className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 py-1.5 md:py-2 rounded-md md:rounded-lg text-[10px] md:text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_0_SCRIPT ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <FileText className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span className="hidden sm:inline">Script</span>
             </button>
-            <button onClick={() => setStage(AppStage.STAGE_1_CONCEPT)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_1_CONCEPT ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
-                <Sparkles className="w-3.5 h-3.5" /> Concept
+            <button onClick={() => setStage(AppStage.STAGE_1_CONCEPT)} className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 py-1.5 md:py-2 rounded-md md:rounded-lg text-[10px] md:text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_1_CONCEPT ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <Sparkles className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span className="hidden sm:inline">Concept</span>
             </button>
-            <button onClick={() => setStage(AppStage.STAGE_2_EDITING)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_2_EDITING ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
-                <Layers className="w-3.5 h-3.5" /> Edit
+            <button onClick={() => setStage(AppStage.STAGE_2_EDITING)} className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 py-1.5 md:py-2 rounded-md md:rounded-lg text-[10px] md:text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_2_EDITING ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <Layers className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span className="hidden sm:inline">Edit</span>
             </button>
-            <button onClick={() => setStage(AppStage.STAGE_3_STORYBOARD)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_3_STORYBOARD ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
-                <Film className="w-3.5 h-3.5" /> Board
+            <button onClick={() => setStage(AppStage.STAGE_3_STORYBOARD)} className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 py-1.5 md:py-2 rounded-md md:rounded-lg text-[10px] md:text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_3_STORYBOARD ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <Film className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span className="hidden sm:inline">Board</span>
             </button>
-            <button onClick={() => setStage(AppStage.STAGE_4_VIDEO)} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_4_VIDEO ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
-                <Video className="w-3.5 h-3.5" /> Video
+            <button onClick={() => setStage(AppStage.STAGE_4_VIDEO)} className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 py-1.5 md:py-2 rounded-md md:rounded-lg text-[10px] md:text-xs font-semibold transition-all duration-300 ${stage === AppStage.STAGE_4_VIDEO ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <Video className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span className="hidden sm:inline">Video</span>
             </button>
         </div>
 
-        <div className="flex items-center gap-3">
-            <button onClick={() => setShowMoodBoardPanel(!showMoodBoardPanel)} className={`p-2.5 rounded-xl transition-colors border ${showMoodBoardPanel ? 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent hover:border-white/10'}`} title="Mood Boards">
-                <ImageIcon className="w-5 h-5" />
+        <div className="flex items-center gap-1 md:gap-3">
+            <button onClick={() => setShowMoodBoardPanel(!showMoodBoardPanel)} className={`p-2 md:p-2.5 rounded-xl transition-colors border ${showMoodBoardPanel ? 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent hover:border-white/10'}`} title="Mood Boards">
+                <ImageIcon className="w-4 md:w-5 h-4 md:h-5" />
             </button>
-            <button onClick={() => setShowPipelineOverview(!showPipelineOverview)} className={`p-2.5 rounded-xl transition-colors border ${showPipelineOverview ? 'text-violet-400 bg-violet-500/10 border-violet-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent hover:border-white/10'}`} title="Pipeline Overview">
-                <LayoutDashboard className="w-5 h-5" />
+            <button onClick={() => setShowPipelineOverview(!showPipelineOverview)} className={`p-2 md:p-2.5 rounded-xl transition-colors border hidden sm:flex ${showPipelineOverview ? 'text-violet-400 bg-violet-500/10 border-violet-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent hover:border-white/10'}`} title="Pipeline Overview">
+                <LayoutDashboard className="w-4 md:w-5 h-4 md:h-5" />
             </button>
-            <button onClick={undoScriptChange} disabled={scriptHistory.length === 0} className={`p-2.5 rounded-xl transition-colors border ${scriptHistory.length > 0 ? 'text-amber-400 hover:bg-amber-500/10 border-amber-500/30' : 'text-zinc-600 border-transparent cursor-not-allowed'}`} title={`Undo (${scriptHistory.length} changes)`}>
-                <Undo2 className="w-5 h-5" />
+            <button onClick={undoScriptChange} disabled={scriptHistory.length === 0} className={`p-2 md:p-2.5 rounded-xl transition-colors border hidden md:flex ${scriptHistory.length > 0 ? 'text-amber-400 hover:bg-amber-500/10 border-amber-500/30' : 'text-zinc-600 border-transparent cursor-not-allowed'}`} title={`Undo (${scriptHistory.length} changes)`}>
+                <Undo2 className="w-4 md:w-5 h-4 md:h-5" />
             </button>
-            <button onClick={handleExportFCPXML} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Export Final Cut Pro XML">
-                <Film className="w-5 h-5" />
+            <button onClick={handleExportFCPXML} className="p-2 md:p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10 hidden lg:flex" title="Export Final Cut Pro XML">
+                <Film className="w-4 md:w-5 h-4 md:h-5" />
             </button>
-            <button onClick={handleExportShotList} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Export Shot List (CSV)">
-                <FileSpreadsheet className="w-5 h-5" />
+            <button onClick={handleExportShotList} className="p-2 md:p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10 hidden lg:flex" title="Export Shot List (CSV)">
+                <FileSpreadsheet className="w-4 md:w-5 h-4 md:h-5" />
             </button>
-            <button onClick={() => setShowDownloadModal(true)} disabled={isExporting} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Download Project ZIP">
+            <button onClick={() => setShowDownloadModal(true)} disabled={isExporting} className="p-2 md:p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Download Project ZIP">
                 {isExporting ? <Loader2 className="w-5 h-5 animate-spin"/> : <DownloadCloud className="w-5 h-5" />}
             </button>
             <button onClick={() => setShowShortcutsModal(true)} className="p-2.5 text-zinc-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/10" title="Keyboard Shortcuts (?)">

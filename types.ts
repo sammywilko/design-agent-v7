@@ -102,6 +102,100 @@ export interface ProducerMessage {
     role: 'user' | 'producer';
     content: string;
     timestamp: number;
+    // Enhanced producer messages can include suggestions
+    suggestions?: ProactiveSuggestion[];
+}
+
+// Proactive suggestion from the Producer
+export interface ProactiveSuggestion {
+    id: string;
+    type: 'missing_asset' | 'workflow_tip' | 'consistency_warning' | 'quality_alert' | 'cost_optimization' | 'best_practice';
+    title: string;
+    description: string;
+    priority: 'low' | 'medium' | 'high';
+    action?: {
+        label: string;
+        command: string; // e.g., 'navigate:world_bible', 'generate:character_sheet'
+    };
+}
+
+// Full project context for the AI Producer
+export interface ProducerContext {
+    // Current state
+    currentStage: AppStage;
+    selectedImageId?: string;
+
+    // Script & Narrative
+    script?: {
+        content: string;
+        beatCount: number;
+        beats: Array<{
+            id: string;
+            visualSummary: string;
+            characters: string[];
+            locations: string[];
+            products: string[];
+            status?: BeatStatus;
+            hasGeneratedImages: boolean;
+        }>;
+    };
+
+    // World Bible Assets
+    worldBible: {
+        characters: Array<{
+            name: string;
+            hasPromptSnippet: boolean;
+            hasCharacterSheet: boolean;
+            hasExpressionBank: boolean;
+            imageRefCount: number;
+            isLocked: boolean;
+        }>;
+        locations: Array<{
+            name: string;
+            hasPromptSnippet: boolean;
+            hasAnchorImage: boolean;
+            imageRefCount: number;
+        }>;
+        products: Array<{
+            name: string;
+            hasPromptSnippet: boolean;
+            imageRefCount: number;
+        }>;
+    };
+
+    // Production Design
+    productionDesign?: {
+        hasLookbook: boolean;
+        visualStyle?: string;
+        colorPalette?: string;
+        hasLightingRef: boolean;
+        hasCameraRig: boolean;
+    };
+
+    // Generation History
+    generationHistory: {
+        totalImages: number;
+        recentGenerations: Array<{
+            prompt: string;
+            timestamp: number;
+            hadReferences: boolean;
+            aspectRatio: string;
+        }>;
+        failedGenerations: number;
+    };
+
+    // Storyboard Status
+    storyboard: {
+        frameCount: number;
+        completedFrames: number;
+        hasStartEndPairs: number;
+    };
+
+    // Contact Sheet
+    contactSheet: {
+        imageCount: number;
+        referenceImageCount: number;
+    };
 }
 
 // Quality Score for AI-evaluated images
@@ -757,4 +851,111 @@ export interface VersionHistoryItem {
     label?: string;                   // Optional user label ("Final v2", "Before color fix")
     isBranch?: boolean;               // Was this a branch point?
     branchedFrom?: string;            // ID of image this branched from
+}
+
+// ============================================================================
+// PRODUCTION JOURNAL - Domain Memory for Generation History
+// ============================================================================
+
+/**
+ * Production Log Entry - Records every generation attempt
+ * This is the foundation for "domain memory" - tracking what worked,
+ * what failed, and building institutional knowledge over sessions.
+ */
+export interface ProductionLogEntry {
+    id: string;
+    timestamp: number;
+    projectId: string;
+
+    // Where in the pipeline
+    stage: 'script' | 'concept' | 'edit' | 'storyboard' | 'video';
+
+    // What action was taken
+    action: 'generate' | 'edit' | 'regenerate' | 'contact_sheet' | 'coverage' | 'delete' | 'accept';
+
+    // Context
+    beatNumber?: number;
+    shotNumber?: number;
+    shotType?: string;
+    subject?: string;
+
+    // The prompt used (for debugging/learning)
+    prompt?: string;
+
+    // What references were injected
+    references: {
+        characters: string[];      // Character names used
+        locations: string[];       // Location names used
+        products: string[];        // Product names used
+        moodboard: boolean;        // Was moodboard DNA used?
+        lookbook: boolean;         // Was lookbook style used?
+        lightingRig: boolean;      // Was lighting rig applied?
+        cameraRig: boolean;        // Was camera language applied?
+    };
+
+    // Result
+    outcome: 'success' | 'failed' | 'partial' | 'pending';
+    resultImageId?: string;        // ID of generated image if success
+    errorMessage?: string;         // Error details if failed
+
+    // User feedback (optional - for future quality scoring)
+    rating?: 1 | 2 | 3 | 4 | 5;   // User rating if provided
+    notes?: string;                // User notes about the generation
+}
+
+// ============================================================================
+// PROJECT TEMPLATES - Pre-configured project setups
+// ============================================================================
+
+/**
+ * Project Template - Reusable project configurations
+ * Built-in templates for common project types + user-created custom templates
+ */
+export interface ProjectTemplate {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;                   // Emoji or icon identifier
+    category: 'commercial' | 'narrative' | 'documentary' | 'fashion' | 'product' | 'custom';
+
+    // Pre-configured World Bible entities
+    worldBible: {
+        suggestedCharacters: Array<{
+            name: string;
+            description: string;
+            placeholder: boolean;      // True if user should replace with their own
+        }>;
+        suggestedLocations: Array<{
+            name: string;
+            description: string;
+            placeholder: boolean;
+        }>;
+        suggestedProducts: Array<{
+            name: string;
+            description: string;
+            placeholder: boolean;
+        }>;
+    };
+
+    // Recommended shot types
+    shotRequirements?: string[];      // e.g., ['Hero', 'Detail', 'Lifestyle', 'Pack Shot']
+    recommendedPacks?: string[];      // e.g., ['cinematic-9', 'product-hero', 'action']
+
+    // Production design suggestions
+    productionDesign?: {
+        lookbookSuggestion?: string;   // Visual style hint
+        lightingPreset?: string;       // e.g., 'studio-soft', 'natural-golden'
+        cameraPreset?: string;         // e.g., 'anamorphic-cinematic'
+    };
+
+    // Workflow guidance
+    workflow: {
+        steps: string[];               // Recommended workflow steps
+        tips: string[];                // Pro tips for this project type
+    };
+
+    // Custom template metadata
+    custom?: boolean;                  // True if user-created
+    createdAt?: number;
+    sourceProjectId?: string;          // If created from existing project
 }

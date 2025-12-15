@@ -1,8 +1,8 @@
 
-import { Project, Message, GeneratedImage, SavedEntity, GeneratedVideo, SavedPrompt, ScriptData, MoodBoard } from '../types';
+import { Project, Message, GeneratedImage, SavedEntity, GeneratedVideo, SavedPrompt, ScriptData, MoodBoard, ProductionLogEntry } from '../types';
 
 const DB_NAME = 'DesignAgentDB';
-const DB_VERSION = 7; // Incremented for Image Blobs
+const DB_VERSION = 8; // Incremented for Production Journal
 
 // ============================================
 // IMAGE BLOB STORAGE UTILITIES
@@ -138,6 +138,15 @@ const openDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains('imageBlobs')) {
           db.createObjectStore('imageBlobs', { keyPath: 'id' });
       }
+
+      // NEW: Production Journal Store for domain memory
+      if (!db.objectStoreNames.contains('productionLog')) {
+          const store = db.createObjectStore('productionLog', { keyPath: 'id' });
+          store.createIndex('projectId', 'projectId', { unique: false });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+          store.createIndex('stage', 'stage', { unique: false });
+          store.createIndex('outcome', 'outcome', { unique: false });
+      }
     };
   });
 };
@@ -166,7 +175,7 @@ export const db = {
 
   deleteProject: async (id: string): Promise<void> => {
     const db = await openDB();
-    const tx = db.transaction(['projects', 'messages', 'history', 'library', 'videos', 'prompts', 'scripts', 'locations', 'products', 'moodboards', 'imageBlobs'], 'readwrite');
+    const tx = db.transaction(['projects', 'messages', 'history', 'library', 'videos', 'prompts', 'scripts', 'locations', 'products', 'moodboards', 'imageBlobs', 'productionLog'], 'readwrite');
     
     tx.objectStore('projects').delete(id);
     
@@ -200,6 +209,7 @@ export const db = {
     deleteByProject('locations');  // NEW
     deleteByProject('products');   // NEW
     deleteByProject('moodboards'); // NEW
+    deleteByProject('productionLog'); // Production Journal
 
     return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();
@@ -533,6 +543,101 @@ export const db = {
           };
           request.onerror = () => reject(request.error);
       });
+  },
+
+  // ============================================
+  // PRODUCTION JOURNAL METHODS
+  // ============================================
+
+  /**
+   * Get all production log entries for a project
+   */
+  getProductionLog: async (projectId: string): Promise<ProductionLogEntry[]> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('productionLog', 'readonly');
+          const index = tx.objectStore('productionLog').index('projectId');
+          const request = index.getAll(IDBKeyRange.only(projectId));
+          request.onsuccess = () => {
+              // Sort by timestamp descending (newest first)
+              const entries = (request.result || []) as ProductionLogEntry[];
+              entries.sort((a, b) => b.timestamp - a.timestamp);
+              resolve(entries);
+          };
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  /**
+   * Save a production log entry
+   */
+  saveProductionLogEntry: async (entry: ProductionLogEntry): Promise<void> => {
+      const db = await openDB();
+      const tx = db.transaction('productionLog', 'readwrite');
+      tx.objectStore('productionLog').put(entry);
+      return new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
+  },
+
+  /**
+   * Update a production log entry (e.g., to add rating/notes after generation)
+   */
+  updateProductionLogEntry: async (id: string, updates: Partial<ProductionLogEntry>): Promise<void> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('productionLog', 'readwrite');
+          const store = tx.objectStore('productionLog');
+          const getRequest = store.get(id);
+
+          getRequest.onsuccess = () => {
+              const existing = getRequest.result;
+              if (existing) {
+                  store.put({ ...existing, ...updates });
+              }
+          };
+
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
+  },
+
+  /**
+   * Delete a production log entry
+   */
+  deleteProductionLogEntry: async (id: string): Promise<void> => {
+      const db = await openDB();
+      const tx = db.transaction('productionLog', 'readwrite');
+      tx.objectStore('productionLog').delete(id);
+      return new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
+  },
+
+  /**
+   * Get production log stats for a project
+   */
+  getProductionLogStats: async (projectId: string): Promise<{
+      total: number;
+      success: number;
+      failed: number;
+      byStage: Record<string, number>;
+  }> => {
+      const entries = await db.getProductionLog(projectId);
+      const stats = {
+          total: entries.length,
+          success: entries.filter(e => e.outcome === 'success').length,
+          failed: entries.filter(e => e.outcome === 'failed').length,
+          byStage: {} as Record<string, number>
+      };
+
+      entries.forEach(e => {
+          stats.byStage[e.stage] = (stats.byStage[e.stage] || 0) + 1;
+      });
+
+      return stats;
   },
 
   /**
