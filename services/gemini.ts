@@ -1010,11 +1010,16 @@ export const generateImage = async (
     const candidates = response.candidates;
     if (!candidates || candidates.length === 0) throw new Error("No image generated");
 
-    const contentParts = candidates[0].content.parts;
+    const content = candidates[0]?.content;
+    if (!content) throw new Error("No content in response");
+
+    const contentParts = content.parts;
+    if (!contentParts || !Array.isArray(contentParts)) throw new Error("No parts in response content");
+
     let base64Data = "";
 
     for (const part of contentParts) {
-      if (part.inlineData) {
+      if (part?.inlineData?.data) {
         base64Data = part.inlineData.data;
         break;
       }
