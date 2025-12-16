@@ -1008,24 +1008,60 @@ export const generateImage = async (
     );
 
     const candidates = response.candidates;
-    if (!candidates || candidates.length === 0) throw new Error("No image generated");
+
+    // Check for blocked response
+    if (response.promptFeedback?.blockReason) {
+      console.error('🚫 Generation blocked:', response.promptFeedback.blockReason);
+      throw new Error(`Generation blocked: ${response.promptFeedback.blockReason}`);
+    }
+
+    if (!candidates || candidates.length === 0) {
+      // Log more details about the response
+      console.error('❌ No candidates in response. Full response:', JSON.stringify(response, null, 2).slice(0, 500));
+      throw new Error("No image generated - API returned no candidates");
+    }
+
+    // Check for finish reason that indicates blocking
+    const finishReason = candidates[0]?.finishReason;
+    if (finishReason && finishReason !== 'STOP' && finishReason !== 'MAX_TOKENS') {
+      console.error('⚠️ Unusual finish reason:', finishReason);
+      if (finishReason === 'SAFETY' || finishReason === 'RECITATION' || finishReason === 'OTHER') {
+        throw new Error(`Generation stopped: ${finishReason}`);
+      }
+    }
 
     const content = candidates[0]?.content;
-    if (!content) throw new Error("No content in response");
+    if (!content) {
+      console.error('❌ No content in candidate. Candidate:', JSON.stringify(candidates[0], null, 2).slice(0, 500));
+      throw new Error("No content in response");
+    }
 
     const contentParts = content.parts;
-    if (!contentParts || !Array.isArray(contentParts)) throw new Error("No parts in response content");
+    if (!contentParts || !Array.isArray(contentParts)) {
+      console.error('❌ No parts in content. Content:', JSON.stringify(content, null, 2).slice(0, 500));
+      throw new Error("No parts in response content");
+    }
 
     let base64Data = "";
+    let textResponse = "";
 
     for (const part of contentParts) {
       if (part?.inlineData?.data) {
         base64Data = part.inlineData.data;
         break;
       }
+      if (part?.text) {
+        textResponse = part.text;
+      }
     }
 
-    if (!base64Data) throw new Error("No image data found in response");
+    if (!base64Data) {
+      // Log any text response which might explain why no image was generated
+      if (textResponse) {
+        console.error('❌ No image but got text response:', textResponse.slice(0, 200));
+      }
+      throw new Error("No image data found in response");
+    }
 
     return {
       id: crypto.randomUUID(),

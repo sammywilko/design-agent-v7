@@ -72,10 +72,10 @@ function matchEntitiesToBibles(
     }
 
     // Match characters by name similarity
-    const matchedCharacters = analysis.entities.characters.map(extracted => {
+    const matchedCharacters = (analysis.entities.characters || []).map(extracted => {
         const match = existingBibles.characters.find(
             c => c.name.toLowerCase() === extracted.name.toLowerCase() ||
-                 extracted.aliases.some(alias =>
+                 (extracted.aliases || []).some(alias =>
                      alias.toLowerCase() === c.name.toLowerCase()
                  )
         );
@@ -86,9 +86,9 @@ function matchEntitiesToBibles(
     });
 
     // Match locations
-    const matchedLocations = analysis.entities.locations.map(extracted => {
+    const matchedLocations = (analysis.entities.locations || []).map(extracted => {
         const match = existingBibles.locations.find(
-            l => l.name?.toLowerCase() === extracted.name.toLowerCase()
+            l => l.name?.toLowerCase() === extracted.name?.toLowerCase()
         );
         return {
             ...extracted,
@@ -97,9 +97,9 @@ function matchEntitiesToBibles(
     });
 
     // Match products
-    const matchedProducts = analysis.entities.products.map(extracted => {
+    const matchedProducts = (analysis.entities.products || []).map(extracted => {
         const match = existingBibles.products.find(
-            p => p.name.toLowerCase() === extracted.name.toLowerCase()
+            p => p.name?.toLowerCase() === extracted.name?.toLowerCase()
         );
         return {
             ...extracted,
