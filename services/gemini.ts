@@ -634,7 +634,7 @@ export const extractStyleDNA = async (imageBase64: string): Promise<string> => {
   const mimeType = getMimeType(imageBase64);
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-2.0-flash',
     contents: {
       parts: [
         { text: "Analyze this image. Extract its visual style DNA: Lighting, Color Palette, Texture, Composition, and Mood. Return a concise, high-density style prompt (max 50 words) that I can use to replicate this aesthetic exactly." },
@@ -655,7 +655,7 @@ export const analyzeLightingReference = async (imageBase64: string): Promise<str
   const mimeType = getMimeType(imageBase64);
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-2.0-flash',
     contents: {
       parts: [
         { text: "Analyze the lighting setup in this image. Describe in 2-3 sentences: key light direction and quality, fill ratio, color temperature, any practical sources, and overall mood. Format as a concise lighting recipe that can be used to replicate this look." },
@@ -676,7 +676,7 @@ export const evaluateImageQuality = async (imageBase64: string, prompt: string):
     const mimeType = getMimeType(imageBase64);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [
                 { text: `You are an expert Art Director and Quality Assurance Bot.
@@ -705,7 +705,7 @@ export const evaluateImageQualityStructured = async (imageBase64: string, prompt
     const mimeType = getMimeType(imageBase64);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [
                 { text: `You are an expert Art Director evaluating AI-generated images.
@@ -784,7 +784,7 @@ export const consultProducer = async (userQuery: string, currentContext: string 
         : currentContext;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [{ text: `${contextString}\n\n=== USER QUERY ===\n${userQuery}` }]
         },
@@ -824,7 +824,7 @@ export const getProactiveSuggestions = async (context: object): Promise<string> 
 export const enhancePrompt = async (simplePrompt: string): Promise<string> => {
     const ai = await getClient();
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [{ text: `You are a Prompt Engineer Expert for Gemini 3.0 Pro Image (Nano Banana Pro). 
             Rewrite the following simple user prompt into a highly detailed, studio-quality image generation prompt.
@@ -903,7 +903,7 @@ export const consultDirector = async (
 
   const response = await withTimeout(
     ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.0-flash',
       contents: {
         role: 'user',
         parts: parts as any
@@ -2181,7 +2181,7 @@ export const generateImageCaption = async (imageBase64: string): Promise<string>
     const mimeType = getMimeType(imageBase64);
   
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-2.0-flash',
       contents: {
         parts: [
           { text: "You are a storyboard scriptwriter. Analyze this frame. Write a concise, professional storyboard description. Format: [SHOT TYPE] - [ACTION/DESCRIPTION]. Example: 'MEDIUM SHOT - The hero glances nervously at the ticking clock.'" },
@@ -2197,7 +2197,7 @@ export const generateTransitionPrompt = async (startImg: string, endImg: string)
     const ai = await getClient();
     
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: [
                 { text: `You are an Expert Veo 3.1 Prompt Engineer. 
@@ -2260,7 +2260,7 @@ export const generateShotSpecs = async (
     });
 
     const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
             parts: parts
         },
@@ -2380,7 +2380,7 @@ export const analyzeScript = async (scriptContent: string): Promise<{ beats: Bea
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-2.0-flash',
     contents: {
       parts: [{ text: `Analyze the following movie script segment. Break it down into visual beats for a storyboard, and extract detailed character profiles including prompts for consistency.
 
@@ -2427,7 +2427,7 @@ export const consultDirectorChat = async (userQuery: string, context: string): P
   const ai = await getClient();
   
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-2.0-flash',
     contents: {
       parts: [{ text: `${VIRTUAL_DIRECTOR_PROMPT}
       
@@ -2459,7 +2459,7 @@ export const analyzeImageCoverage = async (
 ): Promise<CoverageAnalysis> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview'; // Vision capable, fast
+    const model = 'gemini-2.0-flash'; // Vision capable, fast
 
     // Build multimodal prompt with all existing reference images
     const parts: Part[] = [];
@@ -2552,7 +2552,7 @@ export const generateMissingReference = async (
 
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview'; // Nano Banana Pro for image gen
+    const model = 'gemini-2.0-flash'; // Flash for text analysis
 
     // Build multimodal prompt with existing references
     const parts: Part[] = [];
@@ -2626,7 +2626,7 @@ export const generateCharacterAvatar = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview'; // Nano Banana Pro
+    const model = 'gemini-2.0-flash'; // Flash for text analysis
 
     const prompt = `CHARACTER DESIGN PORTRAIT
 
@@ -2688,7 +2688,7 @@ export const analyzeCharacterFromImage = async (
 ): Promise<CharacterAnalysisResult> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview'; // Vision capable, fast
+    const model = 'gemini-2.0-flash'; // Vision capable, fast
 
     // Clean base64 data
     const cleanData = imageBase64.includes(',')
@@ -2928,7 +2928,7 @@ export interface SceneBeat {
 export const generateBeatSheet = async (idea: string): Promise<SceneBeat[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview';
+    const model = 'gemini-2.0-flash';
 
     const prompt = `Create a 5-beat sequence for a film scene based on this idea: "${idea}".
 For each beat, provide the action and a list of 2-3 recommended camera shots (e.g., "Wide Master", "Close Up", "Over The Shoulder").
@@ -2988,7 +2988,7 @@ export const generateLocationWithAtmosphere = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview'; // Nano Banana Pro
+    const model = 'gemini-2.0-flash'; // Flash for text analysis
 
     let prompt = `Cinematic environment concept art. ${description}.`;
     prompt += ` Time of day: ${timeOfDay}. Weather: ${weather}.`;
@@ -3036,7 +3036,7 @@ export const generateLocationWithAtmosphere = async (
 export const generateTexturePack = async (locationDescription: string): Promise<string[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview';
+    const model = 'gemini-2.0-flash';
 
     const prompts = [
       `Close up texture detail of surface for: ${locationDescription}. Material study, photorealistic 8k macro shot.`,
@@ -3231,7 +3231,7 @@ export const analyzeProductionMetadata = async (imageData: string): Promise<Prod
 
     const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [
             {
@@ -3351,7 +3351,7 @@ export interface LocationSpecs {
 export const extractProductSpecs = async (imageData: string): Promise<ProductSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview';
+    const model = 'gemini-2.0-flash';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -3411,7 +3411,21 @@ Focus on visual details that ensure consistent regeneration.`
     const text = response.text;
     if (!text) return null;
 
-    const specs = JSON.parse(text) as ProductSpecs;
+    const parsed = JSON.parse(text);
+    // Ensure arrays have default values to prevent undefined errors
+    const specs: ProductSpecs = {
+      productType: parsed.productType || 'Unknown',
+      brand: parsed.brand || '',
+      modelName: parsed.modelName || '',
+      primaryColor: parsed.primaryColor || '',
+      secondaryColors: parsed.secondaryColors || [],
+      materials: parsed.materials || [],
+      finishes: parsed.finishes || [],
+      logoPlacement: parsed.logoPlacement || '',
+      distinctiveFeatures: parsed.distinctiveFeatures || [],
+      dimensions: parsed.dimensions || '',
+      promptSnippet: parsed.promptSnippet || ''
+    };
     console.log('🔍 Extracted product specs:', specs.productType, specs.primaryColor);
     return specs;
   } catch (error) {
@@ -3506,7 +3520,23 @@ Focus on details that ensure identity consistency across multiple generations.`
         throw new Error('Empty response from API');
       }
 
-      const specs = JSON.parse(text) as CharacterSpecs;
+      const parsed = JSON.parse(text);
+      // Ensure arrays have default values to prevent undefined errors
+      const specs: CharacterSpecs = {
+        gender: parsed.gender || 'Unknown',
+        ageRange: parsed.ageRange || '',
+        ethnicity: parsed.ethnicity || '',
+        skinTone: parsed.skinTone || '',
+        hairColor: parsed.hairColor || '',
+        hairStyle: parsed.hairStyle || '',
+        eyeColor: parsed.eyeColor || '',
+        facialFeatures: parsed.facialFeatures || [],
+        bodyType: parsed.bodyType || '',
+        height: parsed.height || '',
+        distinctiveFeatures: parsed.distinctiveFeatures || [],
+        clothing: parsed.clothing || '',
+        promptSnippet: parsed.promptSnippet || ''
+      };
       console.log('🔍 Extracted character specs:', specs.gender, specs.ageRange, specs.hairStyle);
       return specs;
 
@@ -3544,7 +3574,7 @@ Focus on details that ensure identity consistency across multiple generations.`
 export const extractLocationSpecs = async (imageData: string): Promise<LocationSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-3-pro-preview';
+    const model = 'gemini-2.0-flash';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -3603,7 +3633,21 @@ Focus on atmospheric and visual details for consistent regeneration.`
     const text = response.text;
     if (!text) return null;
 
-    const specs = JSON.parse(text) as LocationSpecs;
+    const parsed = JSON.parse(text);
+    // Ensure arrays have default values to prevent undefined errors
+    const specs: LocationSpecs = {
+      locationType: parsed.locationType || 'Unknown',
+      architectureStyle: parsed.architectureStyle || '',
+      era: parsed.era || '',
+      dominantColors: parsed.dominantColors || [],
+      lightingSituation: parsed.lightingSituation || '',
+      atmosphere: parsed.atmosphere || '',
+      keyElements: parsed.keyElements || [],
+      weatherConditions: parsed.weatherConditions || '',
+      timeOfDay: parsed.timeOfDay || '',
+      realWorldLocation: parsed.realWorldLocation || '',
+      promptSnippet: parsed.promptSnippet || ''
+    };
     console.log('🔍 Extracted location specs:', specs.locationType, specs.atmosphere);
     return specs;
   } catch (error) {
@@ -3997,7 +4041,7 @@ export const extractStyleDNAFromImage = async (imageData: string): Promise<Style
   console.log('🎨 Extracting Style DNA from reference image...');
 
   const ai = await getClient();
-  const model = 'gemini-3-pro-preview';
+  const model = 'gemini-2.0-flash';
 
   const cleanData = cleanDataUrl(imageData);
   const mimeType = getMimeType(imageData);
@@ -4091,7 +4135,7 @@ export const analyzeScriptWithDirector = async (
   const existingProductNames = existingBibles?.products.map(p => p.name) || [];
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.0-flash",
     contents: [
       {
         role: "user",
@@ -4385,7 +4429,7 @@ PRODUCTION DESIGN CONTEXT:
 ` : '';
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.0-flash",
     contents: [
       {
         role: "user",
@@ -4537,7 +4581,7 @@ export const interpretVagueDirection = async (
   const ai = await getClient();
 
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.0-flash",
     contents: [
       {
         role: "user",
