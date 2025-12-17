@@ -6,6 +6,7 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
     getFirestore,
+    initializeFirestore,
     Firestore,
     collection,
     doc,
@@ -23,7 +24,9 @@ import {
     where,
     orderBy,
     enableNetwork,
-    disableNetwork
+    disableNetwork,
+    persistentLocalCache,
+    persistentMultipleTabManager
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -89,13 +92,28 @@ export const initFirebase = (): { app: FirebaseApp; db: Firestore; storage: Fire
     if (!app) {
         try {
             app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
+
+            // Initialize Firestore with optimized settings for better connectivity
+            try {
+                db = initializeFirestore(app, {
+                    localCache: persistentLocalCache({
+                        tabManager: persistentMultipleTabManager()
+                    })
+                });
+            } catch (e: any) {
+                // If already initialized, just get the instance
+                if (e.code === 'failed-precondition' || e.message?.includes('already been called')) {
+                    db = getFirestore(app);
+                } else {
+                    throw e;
+                }
+            }
+
             storage = getStorage(app);
             auth = getAuth(app);
             console.log('Firebase initialized successfully');
 
             // Force enable network to fix "client is offline" issues
-            // This is needed because Firestore's persistence can get stuck in offline mode
             enableNetwork(db).then(() => {
                 console.log('Firestore network enabled');
             }).catch((err) => {
@@ -564,23 +582,54 @@ const createUserDocument = async (user: User): Promise<void> => {
 };
 
 /**
- * Get user document
+ * Get user document with retry and timeout handling
  */
 export const getUserDocument = async (uid: string): Promise<UserDocument | null> => {
     const firestore = getDb();
     if (!firestore) return null;
 
-    try {
-        const userRef = doc(firestore, 'users', uid);
-        const userSnap = await getDoc(userRef);
+    // Retry logic with exponential backoff
+    const maxRetries = 3;
+    let lastError: any;
 
-        if (!userSnap.exists()) return null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Try to re-enable network on each attempt
+            if (attempt > 1) {
+                await enableNetwork(firestore).catch(() => {});
+            }
 
-        return userSnap.data() as UserDocument;
-    } catch (error) {
-        console.error('Failed to get user document:', error);
-        return null;
+            // Use a promise race with timeout
+            const timeoutMs = 5000 * attempt; // Increase timeout on each retry
+            const userRef = doc(firestore, 'users', uid);
+
+            const userSnap = await Promise.race([
+                getDoc(userRef),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Timeout')), timeoutMs)
+                )
+            ]);
+
+            if (!userSnap.exists()) {
+                console.log('User Doc fetched: Not Found');
+                return null;
+            }
+
+            console.log('User Doc fetched: Found');
+            return userSnap.data() as UserDocument;
+        } catch (error: any) {
+            lastError = error;
+            console.warn(`User doc fetch attempt ${attempt}/${maxRetries} failed:`, error?.message || error);
+
+            if (attempt < maxRetries) {
+                // Wait before retry with exponential backoff
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+        }
     }
+
+    console.error('Failed to get user document after retries:', lastError);
+    return null;
 };
 
 // ============================================
@@ -651,7 +700,7 @@ export const createCloudProject = async (
 };
 
 /**
- * Get all projects for a user
+ * Get all projects for a user with retry and timeout handling
  */
 export const getUserProjects = async (userId: string): Promise<CloudProject[]> => {
     const firestore = getDb();
@@ -660,27 +709,53 @@ export const getUserProjects = async (userId: string): Promise<CloudProject[]> =
         return [];
     }
 
-    try {
-        const projectsRef = collection(firestore, 'userProjects');
-        // Simple query without orderBy to avoid needing composite index
-        const q = query(
-            projectsRef,
-            where('ownerId', '==', userId)
-        );
+    // Retry logic
+    const maxRetries = 3;
+    let lastError: any;
 
-        const snapshot = await getDocs(q);
-        const projects = snapshot.docs.map(doc => doc.data() as CloudProject);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Try to re-enable network on retry
+            if (attempt > 1) {
+                console.log(`Retry attempt ${attempt}/${maxRetries} for getUserProjects`);
+                await enableNetwork(firestore).catch(() => {});
+            }
 
-        // Sort client-side instead of using Firestore orderBy
-        return projects.sort((a, b) => {
-            const aTime = a.updatedAt?.toMillis?.() || 0;
-            const bTime = b.updatedAt?.toMillis?.() || 0;
-            return bTime - aTime; // descending
-        });
-    } catch (error: any) {
-        console.error('Failed to get user projects:', error?.message || error);
-        throw error; // Re-throw so storage.ts can handle fallback
+            const projectsRef = collection(firestore, 'userProjects');
+            const q = query(
+                projectsRef,
+                where('ownerId', '==', userId)
+            );
+
+            // Add timeout
+            const timeoutMs = 8000 * attempt;
+            const snapshot = await Promise.race([
+                getDocs(q),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+                )
+            ]);
+
+            const projects = snapshot.docs.map(doc => doc.data() as CloudProject);
+
+            // Sort client-side
+            return projects.sort((a, b) => {
+                const aTime = a.updatedAt?.toMillis?.() || 0;
+                const bTime = b.updatedAt?.toMillis?.() || 0;
+                return bTime - aTime;
+            });
+        } catch (error: any) {
+            lastError = error;
+            console.warn(`getUserProjects attempt ${attempt}/${maxRetries} failed:`, error?.message || error);
+
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+        }
     }
+
+    console.error('Failed to get user projects after retries:', lastError?.message || lastError);
+    throw lastError; // Re-throw so storage.ts can handle fallback
 };
 
 /**

@@ -2,5 +2,8 @@
   "name": "design-agent-v7",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": "vite"
+  "framework": "vite",
+  "env": {
+    "VERCEL_TOOLBAR_ENABLED": "false"
+  }
 }
