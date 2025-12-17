@@ -24,6 +24,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ onSignInClick }) => {
         isFirebaseAvailable
     } = useAuth();
 
+    console.log('UserMenu Render:', { isAuthenticated, isLoading, user: !!user, isFirebaseAvailable });
+
     // Close menu on outside click
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {

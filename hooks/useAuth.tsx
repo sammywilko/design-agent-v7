@@ -67,11 +67,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         initFirebase();
 
         const unsubscribe = subscribeToAuthState(async (user) => {
+            console.log('Auth State Changed:', user ? `User ${user.uid}` : 'No User');
             if (user) {
                 // Fetch user document from Firestore (non-blocking - don't let this fail auth)
                 let userDoc = null;
                 try {
                     userDoc = await getUserDocument(user.uid);
+                    console.log('User Doc fetched:', userDoc ? 'Found' : 'Not Found');
                 } catch (error) {
                     // Firestore may be offline or rules may block - that's OK, auth still works
                     console.warn('Could not fetch user document (non-critical):', error);
