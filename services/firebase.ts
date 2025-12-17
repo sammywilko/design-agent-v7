@@ -488,15 +488,21 @@ export const signInWithEmail = async (
 
 /**
  * Sign in with Google
+ * Uses popup - the createUserDocument is non-blocking to prevent hangs
  */
 export const signInWithGoogle = async (): Promise<UserCredential> => {
     const authInstance = getAuthInstance();
     if (!authInstance) throw new Error('Firebase not configured');
 
+    console.log('Attempting Google sign-in popup...');
     const credential = await signInWithPopup(authInstance, googleProvider);
+    console.log('Google sign-in popup successful, user:', credential.user.uid);
 
-    // Create/update user document
-    await createUserDocument(credential.user);
+    // Create/update user document (non-blocking - don't wait for Firestore)
+    // This prevents the spinner from hanging if Firestore is slow/offline
+    createUserDocument(credential.user).catch(err => {
+        console.warn('Could not create user document (non-critical):', err);
+    });
 
     return credential;
 };

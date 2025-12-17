@@ -146,10 +146,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const signInGoogle = useCallback(async (): Promise<boolean> => {
         setState(prev => ({ ...prev, isLoading: true, error: null }));
 
+        // Safety timeout - if nothing happens in 30 seconds, stop loading
+        const timeoutId = setTimeout(() => {
+            setState(prev => {
+                if (prev.isLoading) {
+                    console.warn('Google sign-in timed out');
+                    return { ...prev, isLoading: false, error: 'Sign-in timed out. Please try again.' };
+                }
+                return prev;
+            });
+        }, 30000);
+
         try {
+            console.log('Starting Google sign-in...');
             await signInWithGoogle();
+            clearTimeout(timeoutId);
+            console.log('Google sign-in successful');
             return true;
         } catch (error: any) {
+            clearTimeout(timeoutId);
+            console.error('Google sign-in error:', error.code, error.message);
             const message = getAuthErrorMessage(error.code);
             setState(prev => ({ ...prev, isLoading: false, error: message }));
             return false;
