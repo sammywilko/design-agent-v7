@@ -692,11 +692,14 @@ export const createCloudProject = async (
             beatCount: 0
         });
 
-        // Increment user's project count
+        // Increment user's project count (use setDoc with merge to handle missing user docs)
         const userRef = doc(firestore, 'users', userId);
-        await updateDoc(userRef, {
-            projectCount: (await getDoc(userRef)).data()?.projectCount + 1 || 1
-        });
+        const userSnap = await getDoc(userRef);
+        const currentCount = userSnap.exists() ? (userSnap.data()?.projectCount || 0) : 0;
+        await setDoc(userRef, {
+            projectCount: currentCount + 1,
+            lastLoginAt: serverTimestamp()
+        }, { merge: true });
 
         return projectId;
     } catch (error) {
@@ -886,13 +889,13 @@ export const deleteCloudProject = async (projectId: string, userId: string): Pro
         const projectRef = doc(firestore, 'userProjects', projectId);
         await deleteDoc(projectRef);
 
-        // Decrement user's project count
+        // Decrement user's project count (use setDoc with merge to handle missing user docs)
         const userRef = doc(firestore, 'users', userId);
         const userDoc = await getDoc(userRef);
-        const currentCount = userDoc.data()?.projectCount || 1;
-        await updateDoc(userRef, {
+        const currentCount = userDoc.exists() ? (userDoc.data()?.projectCount || 1) : 0;
+        await setDoc(userRef, {
             projectCount: Math.max(0, currentCount - 1)
-        });
+        }, { merge: true });
 
         return true;
     } catch (error) {
