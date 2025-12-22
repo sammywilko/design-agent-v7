@@ -20,8 +20,8 @@ import { Project, ScriptData, MoodBoard, GeneratedImage, SavedEntity } from '../
 // Cloud sync is now enabled
 const CLOUD_SYNC_ENABLED = true;
 
-// Timeout for Firestore operations (5 seconds - increased for initial connection)
-const FIRESTORE_TIMEOUT = 5000;
+// Timeout for Firestore operations (3 seconds - fail fast, use local)
+const FIRESTORE_TIMEOUT = 3000;
 
 /**
  * Wrap a promise with a timeout

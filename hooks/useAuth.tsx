@@ -173,14 +173,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     /**
-     * Sign out - clears local data and reloads
+     * Sign out - preserves local data for safety
      */
     const logout = useCallback(async (): Promise<void> => {
         try {
             await signOut();
-            // Clear all local IndexedDB data on logout
-            await db.clearAllData();
-            // Reload the page to reset all app state
+            // Local data preserved - projects stay safe even if cloud sync failed
             window.location.reload();
         } catch (error) {
             console.error('Logout failed:', error);

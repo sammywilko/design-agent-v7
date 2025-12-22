@@ -733,8 +733,8 @@ export const getUserProjects = async (userId: string): Promise<CloudProject[]> =
                 where('ownerId', '==', userId)
             );
 
-            // Add timeout
-            const timeoutMs = 8000 * attempt;
+            // Add timeout - faster fallback (3s, 6s, 9s)
+            const timeoutMs = 3000 * attempt;
             const snapshot = await Promise.race([
                 getDocs(q),
                 new Promise<never>((_, reject) =>
