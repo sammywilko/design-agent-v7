@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap, FolderOpen, FolderCheck } from 'lucide-react';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap, FolderOpen, FolderCheck, FolderSync } from 'lucide-react';
 import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem, ProductionLogEntry } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
@@ -126,7 +126,7 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
   const [showCoverageModal, setShowCoverageModal] = useState(false);
 
   // Project Folder Hook for smart saves
-  const { folderName, hasFolder, isSupported: isFolderSupported, isSaving: isFolderSaving, saveToFolder, clearFolder } = useProjectFolder(currentProject.id);
+  const { folderName, hasFolder, isSupported: isFolderSupported, isSaving: isFolderSaving, permissionLost, saveToFolder, clearFolder, reauthorize } = useProjectFolder(currentProject.id);
 
   // Dropdown Menu State
   const [openDropdown, setOpenDropdown] = useState<'enhance' | 'style' | 'rotate' | 'lighting' | null>(null);
@@ -2131,17 +2131,40 @@ CRITICAL REQUIREMENTS:
              {isFolderSupported && (
                <div className="relative group">
                  <button
-                   onClick={handleSmartSave}
+                   onClick={async () => {
+                     if (permissionLost && hasFolder) {
+                       // Permission lost - try to reauthorize first
+                       const reauthorized = await reauthorize();
+                       if (reauthorized) {
+                         handleSmartSave();
+                       } else {
+                         // Reauth failed, pick new folder
+                         handleSmartSave();
+                       }
+                     } else {
+                       handleSmartSave();
+                     }
+                   }}
                    disabled={!currentImage || isFolderSaving}
-                   className={`p-4 rounded-2xl transition-all border border-transparent disabled:opacity-50 ${
-                     hasFolder
-                       ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 hover:border-emerald-500/20'
-                       : 'text-zinc-400 hover:text-white hover:bg-white/5 hover:border-white/10'
+                   className={`p-4 rounded-2xl transition-all border disabled:opacity-50 ${
+                     permissionLost && hasFolder
+                       ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 border-amber-500/30 hover:border-amber-500/50'
+                       : hasFolder
+                         ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border-transparent hover:border-emerald-500/20'
+                         : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent hover:border-white/10'
                    }`}
-                   title={hasFolder ? `Save to: ${folderName}` : 'Pick folder & save'}
+                   title={
+                     permissionLost && hasFolder
+                       ? `Permission needed for: ${folderName}`
+                       : hasFolder
+                         ? `Save to: ${folderName}`
+                         : 'Pick folder & save'
+                   }
                  >
                    {isFolderSaving ? (
                      <Loader2 className="w-5 h-5 animate-spin" />
+                   ) : permissionLost && hasFolder ? (
+                     <FolderSync className="w-5 h-5" />
                    ) : hasFolder ? (
                      <FolderCheck className="w-5 h-5" />
                    ) : (
@@ -2149,16 +2172,23 @@ CRITICAL REQUIREMENTS:
                    )}
                  </button>
 
-                 {/* Tooltip showing folder name */}
+                 {/* Tooltip showing folder name and status */}
                  {hasFolder && (
-                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                     <span className="mr-1">📁</span> {folderName}
-                     <button
-                       onClick={(e) => { e.stopPropagation(); clearFolder(); }}
-                       className="ml-2 text-zinc-500 hover:text-red-400 pointer-events-auto"
-                     >
-                       ✕
-                     </button>
+                   <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 border rounded-lg text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 ${
+                     permissionLost
+                       ? 'bg-amber-900/90 border-amber-700 text-amber-200'
+                       : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                   }`}>
+                     {permissionLost ? '⚠️ Click to reauthorize: ' : '📁 '}
+                     {folderName}
+                     {!permissionLost && (
+                       <button
+                         onClick={(e) => { e.stopPropagation(); clearFolder(); }}
+                         className="ml-2 text-zinc-500 hover:text-red-400 pointer-events-auto"
+                       >
+                         ✕
+                       </button>
+                     )}
                    </div>
                  )}
                </div>
