@@ -2,7 +2,7 @@
 import { Project, Message, GeneratedImage, SavedEntity, GeneratedVideo, SavedPrompt, ScriptData, MoodBoard, ProductionLogEntry } from '../types';
 
 const DB_NAME = 'DesignAgentDB';
-const DB_VERSION = 8; // Incremented for Production Journal
+const DB_VERSION = 12; // Incremented for Project Folders
 
 // ============================================
 // IMAGE BLOB STORAGE UTILITIES
@@ -146,6 +146,11 @@ const openDB = (): Promise<IDBDatabase> => {
           store.createIndex('timestamp', 'timestamp', { unique: false });
           store.createIndex('stage', 'stage', { unique: false });
           store.createIndex('outcome', 'outcome', { unique: false });
+      }
+
+      // NEW: Project Folders Store for per-project download directories
+      if (!db.objectStoreNames.contains('projectFolders')) {
+          db.createObjectStore('projectFolders', { keyPath: 'projectId' });
       }
     };
   });
@@ -638,6 +643,56 @@ export const db = {
       });
 
       return stats;
+  },
+
+  // ============================================
+  // PROJECT DOWNLOAD FOLDER STORAGE
+  // ============================================
+
+  /**
+   * Store a directory handle for a project's download folder
+   */
+  saveProjectFolder: async (projectId: string, folderHandle: FileSystemDirectoryHandle): Promise<void> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('projectFolders', 'readwrite');
+          tx.objectStore('projectFolders').put({
+              projectId,
+              folderHandle,
+              savedAt: Date.now()
+          });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
+  },
+
+  /**
+   * Get the saved directory handle for a project
+   */
+  getProjectFolder: async (projectId: string): Promise<FileSystemDirectoryHandle | null> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('projectFolders', 'readonly');
+          const request = tx.objectStore('projectFolders').get(projectId);
+          request.onsuccess = () => {
+              const result = request.result;
+              resolve(result?.folderHandle || null);
+          };
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  /**
+   * Clear the saved folder for a project
+   */
+  clearProjectFolder: async (projectId: string): Promise<void> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction('projectFolders', 'readwrite');
+          tx.objectStore('projectFolders').delete(projectId);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+      });
   },
 
   /**

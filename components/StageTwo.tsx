@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap } from 'lucide-react';
+import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap, FolderOpen, FolderCheck } from 'lucide-react';
 import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem, ProductionLogEntry } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
 import CoverageModal from './CoverageModal';
 import ReactMarkdown from 'react-markdown';
+import { useProjectFolder } from '../hooks/useProjectFolder';
 
 interface StageTwoProps {
   initialImage: GeneratedImage | null;
@@ -123,6 +124,9 @@ const StageTwo: React.FC<StageTwoProps> = ({ initialImage, onBack, showNotificat
 
   // Coverage Modal State
   const [showCoverageModal, setShowCoverageModal] = useState(false);
+
+  // Project Folder Hook for smart saves
+  const { folderName, hasFolder, isSupported: isFolderSupported, isSaving: isFolderSaving, saveToFolder, clearFolder } = useProjectFolder(currentProject.id);
 
   // Dropdown Menu State
   const [openDropdown, setOpenDropdown] = useState<'enhance' | 'style' | 'rotate' | 'lighting' | null>(null);
@@ -1088,6 +1092,36 @@ CRITICAL REQUIREMENTS:
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Smart Save to Project Folder
+  const handleSmartSave = async () => {
+    if (!currentImage) return;
+
+    try {
+      // Convert base64 to blob
+      const response = await fetch(currentImage.url);
+      const blob = await response.blob();
+
+      // Generate filename
+      const sanitizedProject = currentProject.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const filename = `${sanitizedProject}_render_${Date.now()}.png`;
+
+      // Save to project folder
+      const success = await saveToFolder(filename, blob);
+
+      if (success) {
+        showNotification(`Saved to ${folderName || 'folder'}!`);
+      } else {
+        // Fallback to regular download
+        showNotification('Folder save cancelled. Using regular download.');
+        handleDownload();
+      }
+    } catch (error) {
+      console.error('Smart save failed:', error);
+      showNotification('Save failed. Using regular download.');
+      handleDownload();
+    }
   };
 
   const saveToLibrary = async () => {
@@ -2086,12 +2120,49 @@ CRITICAL REQUIREMENTS:
                multiple
                onChange={(e) => handleUploadToGallery(e.target.files)} 
              />
-             <button 
+             <button
                onClick={handleDownload}
                disabled={!currentImage}
                className="p-4 text-zinc-400 hover:text-white hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/10 disabled:opacity-50" title="Download High-Res">
                <Download className="w-5 h-5" />
              </button>
+
+             {/* Smart Save to Project Folder */}
+             {isFolderSupported && (
+               <div className="relative group">
+                 <button
+                   onClick={handleSmartSave}
+                   disabled={!currentImage || isFolderSaving}
+                   className={`p-4 rounded-2xl transition-all border border-transparent disabled:opacity-50 ${
+                     hasFolder
+                       ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 hover:border-emerald-500/20'
+                       : 'text-zinc-400 hover:text-white hover:bg-white/5 hover:border-white/10'
+                   }`}
+                   title={hasFolder ? `Save to: ${folderName}` : 'Pick folder & save'}
+                 >
+                   {isFolderSaving ? (
+                     <Loader2 className="w-5 h-5 animate-spin" />
+                   ) : hasFolder ? (
+                     <FolderCheck className="w-5 h-5" />
+                   ) : (
+                     <FolderOpen className="w-5 h-5" />
+                   )}
+                 </button>
+
+                 {/* Tooltip showing folder name */}
+                 {hasFolder && (
+                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                     <span className="mr-1">📁</span> {folderName}
+                     <button
+                       onClick={(e) => { e.stopPropagation(); clearFolder(); }}
+                       className="ml-2 text-zinc-500 hover:text-red-400 pointer-events-auto"
+                     >
+                       ✕
+                     </button>
+                   </div>
+                 )}
+               </div>
+             )}
            </div>
         </div>
       </div>
