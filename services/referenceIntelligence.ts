@@ -144,7 +144,7 @@ export class ReferenceIntelligenceService {
 
     try {
       const result = await this.genAI.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: [{ role: 'user', parts }]
       });
 
@@ -455,7 +455,7 @@ Be strict but fair. Small variations are expected.`;
       ];
 
       const result = await this.genAI.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: [{ role: 'user', parts }]
       });
 

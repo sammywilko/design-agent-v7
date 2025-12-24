@@ -7,7 +7,7 @@ import { sanitizePrompt, validatePrompt, validateImageDataUrl, validateReference
 // MODEL CONFIGURATION - PRIMARY + FALLBACK
 // ============================================================================
 const PRIMARY_IMAGE_MODEL = 'gemini-3-pro-image-preview';      // Nano Banana Pro - 14 refs max
-const FALLBACK_IMAGE_MODEL = 'gemini-2.5-flash-preview-image-generation';  // Flash - 3 refs max
+const FALLBACK_IMAGE_MODEL = 'gemini-3-flash-preview';  // Flash - 3 refs max
 const FALLBACK_MAX_REFS = 3;  // Flash model limitation
 
 // Track which model is currently being used
@@ -634,7 +634,7 @@ export const extractStyleDNA = async (imageBase64: string): Promise<string> => {
   const mimeType = getMimeType(imageBase64);
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [
         { text: "Analyze this image. Extract its visual style DNA: Lighting, Color Palette, Texture, Composition, and Mood. Return a concise, high-density style prompt (max 50 words) that I can use to replicate this aesthetic exactly." },
@@ -655,7 +655,7 @@ export const analyzeLightingReference = async (imageBase64: string): Promise<str
   const mimeType = getMimeType(imageBase64);
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [
         { text: "Analyze the lighting setup in this image. Describe in 2-3 sentences: key light direction and quality, fill ratio, color temperature, any practical sources, and overall mood. Format as a concise lighting recipe that can be used to replicate this look." },
@@ -676,7 +676,7 @@ export const evaluateImageQuality = async (imageBase64: string, prompt: string):
     const mimeType = getMimeType(imageBase64);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [
                 { text: `You are an expert Art Director and Quality Assurance Bot.
@@ -705,7 +705,7 @@ export const evaluateImageQualityStructured = async (imageBase64: string, prompt
     const mimeType = getMimeType(imageBase64);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [
                 { text: `You are an expert Art Director evaluating AI-generated images.
@@ -784,7 +784,7 @@ export const consultProducer = async (userQuery: string, currentContext: string 
         : currentContext;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [{ text: `${contextString}\n\n=== USER QUERY ===\n${userQuery}` }]
         },
@@ -806,7 +806,7 @@ export const getProactiveSuggestions = async (context: object): Promise<string> 
     const contextString = buildProducerContextString(context);
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',  // Use faster model for suggestions
+        model: 'gemini-3-flash-preview',  // Use faster model for suggestions
         contents: {
             parts: [{ text: `${contextString}\n\n=== TASK ===\nBased on this project context, provide 2-3 brief, specific, actionable suggestions to help the user improve their workflow or fill gaps in their production. Be direct and reference specific assets/beats by name if relevant. Keep it under 150 words total.` }]
         },
@@ -824,7 +824,7 @@ export const getProactiveSuggestions = async (context: object): Promise<string> 
 export const enhancePrompt = async (simplePrompt: string): Promise<string> => {
     const ai = await getClient();
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [{ text: `You are a Prompt Engineer Expert for Gemini 3.0 Pro Image (Nano Banana Pro). 
             Rewrite the following simple user prompt into a highly detailed, studio-quality image generation prompt.
@@ -903,7 +903,7 @@ export const consultDirector = async (
 
   const response = await withTimeout(
     ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3-flash-preview',
       contents: {
         role: 'user',
         parts: parts as any
@@ -927,7 +927,7 @@ export const consultDirector = async (
 /**
  * Stage 1 & 2: Image Generation with automatic model fallback.
  * Primary: Nano Banana Pro (gemini-3-pro-image-preview) - supports up to 14 refs
- * Fallback: Flash (gemini-2.5-flash-preview-image-generation) - supports up to 3 refs
+ * Fallback: Flash (gemini-3-flash-preview) - supports up to 3 refs
  */
 export const generateImage = async (
     prompt: string,
@@ -2222,7 +2222,7 @@ export const generateImageCaption = async (imageBase64: string): Promise<string>
     const mimeType = getMimeType(imageBase64);
   
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { text: "You are a storyboard scriptwriter. Analyze this frame. Write a concise, professional storyboard description. Format: [SHOT TYPE] - [ACTION/DESCRIPTION]. Example: 'MEDIUM SHOT - The hero glances nervously at the ticking clock.'" },
@@ -2238,7 +2238,7 @@ export const generateTransitionPrompt = async (startImg: string, endImg: string)
     const ai = await getClient();
     
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [
                 { text: `You are an Expert Veo 3.1 Prompt Engineer. 
@@ -2301,7 +2301,7 @@ export const generateShotSpecs = async (
     });
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: parts
         },
@@ -2421,7 +2421,7 @@ export const analyzeScript = async (scriptContent: string): Promise<{ beats: Bea
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [{ text: `Analyze the following movie script segment. Break it down into visual beats for a storyboard, and extract detailed character profiles including prompts for consistency.
 
@@ -2468,7 +2468,7 @@ export const consultDirectorChat = async (userQuery: string, context: string): P
   const ai = await getClient();
   
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [{ text: `${VIRTUAL_DIRECTOR_PROMPT}
       
@@ -2500,7 +2500,7 @@ export const analyzeImageCoverage = async (
 ): Promise<CoverageAnalysis> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash'; // Vision capable, fast
+    const model = 'gemini-3-flash-preview'; // Vision capable, fast
 
     // Build multimodal prompt with all existing reference images
     const parts: Part[] = [];
@@ -2593,7 +2593,7 @@ export const generateMissingReference = async (
 
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash'; // Flash for text analysis
+    const model = 'gemini-3-flash-preview'; // Flash for text analysis
 
     // Build multimodal prompt with existing references
     const parts: Part[] = [];
@@ -2667,7 +2667,7 @@ export const generateCharacterAvatar = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash'; // Flash for text analysis
+    const model = 'gemini-3-flash-preview'; // Flash for text analysis
 
     const prompt = `CHARACTER DESIGN PORTRAIT
 
@@ -2729,7 +2729,7 @@ export const analyzeCharacterFromImage = async (
 ): Promise<CharacterAnalysisResult> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash'; // Vision capable, fast
+    const model = 'gemini-3-flash-preview'; // Vision capable, fast
 
     // Clean base64 data
     const cleanData = imageBase64.includes(',')
@@ -2969,7 +2969,7 @@ export interface SceneBeat {
 export const generateBeatSheet = async (idea: string): Promise<SceneBeat[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-3-flash-preview';
 
     const prompt = `Create a 5-beat sequence for a film scene based on this idea: "${idea}".
 For each beat, provide the action and a list of 2-3 recommended camera shots (e.g., "Wide Master", "Close Up", "Over The Shoulder").
@@ -3029,7 +3029,7 @@ export const generateLocationWithAtmosphere = async (
 ): Promise<string | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash'; // Flash for text analysis
+    const model = 'gemini-3-flash-preview'; // Flash for text analysis
 
     let prompt = `Cinematic environment concept art. ${description}.`;
     prompt += ` Time of day: ${timeOfDay}. Weather: ${weather}.`;
@@ -3077,7 +3077,7 @@ export const generateLocationWithAtmosphere = async (
 export const generateTexturePack = async (locationDescription: string): Promise<string[]> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-3-flash-preview';
 
     const prompts = [
       `Close up texture detail of surface for: ${locationDescription}. Material study, photorealistic 8k macro shot.`,
@@ -3272,7 +3272,7 @@ export const analyzeProductionMetadata = async (imageData: string): Promise<Prod
 
     const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview',
         contents: {
           parts: [
             {
@@ -3392,7 +3392,7 @@ export interface LocationSpecs {
 export const extractProductSpecs = async (imageData: string): Promise<ProductSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-3-flash-preview';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -3490,7 +3490,7 @@ export const extractCharacterSpecs = async (
 ): Promise<CharacterSpecs | null> => {
   const ai = await getClient();
   // Use Flash for speed - spec extraction doesn't need Pro quality
-  const model = 'gemini-2.0-flash';
+  const model = 'gemini-3-flash-preview';
 
   const cleanData = cleanDataUrl(imageData);
   const mimeType = getMimeType(imageData);
@@ -3615,7 +3615,7 @@ Focus on details that ensure identity consistency across multiple generations.`
 export const extractLocationSpecs = async (imageData: string): Promise<LocationSpecs | null> => {
   try {
     const ai = await getClient();
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-3-flash-preview';
 
     const cleanData = cleanDataUrl(imageData);
     const mimeType = getMimeType(imageData);
@@ -4082,7 +4082,7 @@ export const extractStyleDNAFromImage = async (imageData: string): Promise<Style
   console.log('🎨 Extracting Style DNA from reference image...');
 
   const ai = await getClient();
-  const model = 'gemini-2.0-flash';
+  const model = 'gemini-3-flash-preview';
 
   const cleanData = cleanDataUrl(imageData);
   const mimeType = getMimeType(imageData);
@@ -4176,7 +4176,7 @@ export const analyzeScriptWithDirector = async (
   const existingProductNames = existingBibles?.products.map(p => p.name) || [];
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-3-flash-preview",
     contents: [
       {
         role: "user",
@@ -4470,7 +4470,7 @@ PRODUCTION DESIGN CONTEXT:
 ` : '';
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-3-flash-preview",
     contents: [
       {
         role: "user",
@@ -4622,7 +4622,7 @@ export const interpretVagueDirection = async (
   const ai = await getClient();
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-3-flash-preview",
     contents: [
       {
         role: "user",
