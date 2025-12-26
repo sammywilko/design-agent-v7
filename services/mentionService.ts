@@ -323,5 +323,3 @@ export const mentionService = {
       .slice(0, 30);
   }
 };
-
-export type { SharedAsset, AssetMention, CreateAssetInput };

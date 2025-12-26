@@ -115,7 +115,6 @@ export const MentionableInput: React.FC<MentionableInputProps> = ({
           filterType={filterType}
           allowCreate={allowCreate}
           projectId={projectId}
-          sourceApp={sourceApp}
         />,
         document.body
       )}
