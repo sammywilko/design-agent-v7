@@ -28,6 +28,7 @@ import {
     Beat
 } from '../types';
 import { analyzeMessyScript, convertAnalyzedBeatsToBeats } from '../services/scriptDirector';
+import { MentionableInput } from './MentionableInput';
 
 interface ScriptDirectorModalProps {
     isOpen: boolean;
@@ -283,10 +284,17 @@ const ScriptDirectorModal: React.FC<ScriptDirectorModalProps> = ({
                             </div>
 
                             <div className="space-y-4">
-                                <textarea
-                                    value={scriptText}
-                                    onChange={(e) => setScriptText(e.target.value)}
-                                    placeholder={`Paste your script here...
+                                <MentionableInput
+                                    sourceApp="design-agent"
+                                    contextType="script-input"
+                                    allowCreate={true}
+                                >
+                                    {(ref) => (
+                                        <textarea
+                                            ref={ref as React.RefObject<HTMLTextAreaElement>}
+                                            value={scriptText}
+                                            onChange={(e) => setScriptText(e.target.value)}
+                                            placeholder={`Paste your script here...
 
 Example:
 "Scene opens on Tower Bridge at dusk. Millie (30s, red hair, leopard print coat) stands in the center of the bridge.
@@ -294,8 +302,10 @@ Example:
 A Forrest Gump feather-type moment - wind catches her scarf as traffic passes behind her.
 
 Cut to @CEO in the corner office, watching the city lights..."`}
-                                    className="w-full h-80 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:border-amber-500 focus:outline-none resize-none font-mono text-sm"
-                                />
+                                            className="w-full h-80 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:border-amber-500 focus:outline-none resize-none font-mono text-sm"
+                                        />
+                                    )}
+                                </MentionableInput>
 
                                 <div className="flex items-center gap-4 text-xs text-zinc-500">
                                     <div className="flex items-center gap-1">

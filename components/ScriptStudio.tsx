@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bot, FileText, Users, Film, Layout, Sparkles, Plus, Trash2, Save, Wand2, Image as ImageIcon, ArrowRight, Loader2, Upload, Palette, Video, Lock, Unlock, CheckCircle2, AlertCircle, MapPin, Package, Sun, Cloud, Building2, Eye, Search, RefreshCw, Grid, Lightbulb, X, Camera, User, Move, ChevronDown, ChevronUp, Layers, Images, UserPlus, Clapperboard } from 'lucide-react';
+import { MentionableInput } from './MentionableInput';
 import { Project, ScriptData, Beat, Shot, CharacterProfile, LocationProfile, ProductProfile, GeneratedImage, ReferenceAsset, ProductionDesign, BeatStatus, CoverageAnalysis, RefCoverage, FocalLength, Aperture, ColorTemperature, CameraRig, MoodBoard, CharacterSpecs, LocationSpecs, ProductSpecs, ProjectDefaultStyle } from '../types';
 import PhotoToCharacterModal from './PhotoToCharacterModal';
 import ScriptDirectorModal from './ScriptDirectorModal';
@@ -1613,12 +1614,23 @@ Example:
                                         {/* Full Visual Summary Editor */}
                                         <div>
                                             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">Visual Summary / Prompt</label>
-                                            <textarea
-                                                value={beat.visualSummary}
-                                                onChange={(e) => updateBeat(beat.id, 'visualSummary', e.target.value)}
-                                                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-sm text-white resize-none focus:border-violet-500 focus:outline-none min-h-[100px]"
-                                                placeholder="Describe the visual action in detail..."
-                                            />
+                                            <MentionableInput
+                                                sourceApp="design-agent"
+                                                projectId={currentProject.id}
+                                                contextType="beat"
+                                                contextId={beat.id}
+                                                allowCreate={true}
+                                            >
+                                                {(ref) => (
+                                                    <textarea
+                                                        ref={ref as React.RefObject<HTMLTextAreaElement>}
+                                                        value={beat.visualSummary}
+                                                        onChange={(e) => updateBeat(beat.id, 'visualSummary', e.target.value)}
+                                                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-sm text-white resize-none focus:border-violet-500 focus:outline-none min-h-[100px]"
+                                                        placeholder="Describe the visual action in detail... Type @ to mention characters, locations, or styles"
+                                                    />
+                                                )}
+                                            </MentionableInput>
                                         </div>
 
                                         {/* Beat Metadata Row */}
@@ -1707,12 +1719,23 @@ Example:
                                                                     {shotIdx + 1}
                                                                 </div>
                                                                 <div className="flex-1 space-y-2">
-                                                                    <textarea
-                                                                        value={shot.description}
-                                                                        onChange={(e) => updateShot(beat.id, shot.id, 'description', e.target.value)}
-                                                                        placeholder="Describe what the camera sees..."
-                                                                        className="w-full bg-transparent border-none text-sm text-white resize-none focus:outline-none min-h-[40px]"
-                                                                    />
+                                                                    <MentionableInput
+                                                                        sourceApp="design-agent"
+                                                                        projectId={currentProject.id}
+                                                                        contextType="shot"
+                                                                        contextId={shot.id}
+                                                                        allowCreate={true}
+                                                                    >
+                                                                        {(ref) => (
+                                                                            <textarea
+                                                                                ref={ref as React.RefObject<HTMLTextAreaElement>}
+                                                                                value={shot.description}
+                                                                                onChange={(e) => updateShot(beat.id, shot.id, 'description', e.target.value)}
+                                                                                placeholder="Describe what the camera sees... Type @ to mention"
+                                                                                className="w-full bg-transparent border-none text-sm text-white resize-none focus:outline-none min-h-[40px]"
+                                                                            />
+                                                                        )}
+                                                                    </MentionableInput>
                                                                     <div className="flex items-center gap-2 flex-wrap">
                                                                         <select
                                                                             value={shot.shotSize}
