@@ -2625,7 +2625,7 @@ Example:
                         <MapPin className="w-6 h-6 text-blue-400"/>
                         Location Bible
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-20 custom-scrollbar pr-2">
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-20 custom-scrollbar pr-2 content-start">
                         {/* Add Card */}
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center"><MapPin className="w-8 h-8 text-zinc-600" /></div>
@@ -2901,7 +2901,7 @@ Example:
                         <Package className="w-6 h-6 text-amber-400"/>
                         Product Bible
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-20 custom-scrollbar pr-2">
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-20 custom-scrollbar pr-2 content-start">
                         {/* Add Card */}
                         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 min-h-[300px]">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center"><Package className="w-8 h-8 text-zinc-600" /></div>
