@@ -2656,8 +2656,8 @@ Example:
                         {locations.map(loc => {
                             const hasRef = loc.imageRefs && loc.imageRefs.length > 0;
                             return (
-                                <div key={loc.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative ${hasRef ? 'border-blue-500/30 shadow-blue-900/10 shadow-lg' : 'border-white/5'}`}>
-                                    <div className="h-40 bg-zinc-950 relative">
+                                <div key={loc.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative flex flex-col max-h-[600px] ${hasRef ? 'border-blue-500/30 shadow-blue-900/10 shadow-lg' : 'border-white/5'}`}>
+                                    <div className="h-40 bg-zinc-950 relative shrink-0">
                                         {hasRef ? (
                                             <div className="w-full h-full flex">
                                                 {loc.imageRefs!.slice(0, 3).map((ref, i) => (
@@ -2680,7 +2680,7 @@ Example:
                                         <h3 className="absolute bottom-3 left-4 font-bold text-lg text-white">{loc.name}</h3>
                                         <input type="file" id={`upload-loc-${loc.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, loc.id, 'location', true)} />
                                     </div>
-                                    <div className="p-4 space-y-4">
+                                    <div className="p-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                                         {/* Spec Extraction Loading Indicator */}
                                         {extractingSpecsFor?.id === loc.id && extractingSpecsFor?.type === 'location' && (
                                             <div className="flex items-center gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
@@ -2932,8 +2932,8 @@ Example:
                         {products.map(prod => {
                             const hasRef = prod.imageRefs && prod.imageRefs.length > 0;
                             return (
-                                <div key={prod.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative ${hasRef ? 'border-amber-500/30 shadow-amber-900/10 shadow-lg' : 'border-white/5'}`}>
-                                    <div className="h-40 bg-zinc-950 relative">
+                                <div key={prod.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden group transition-all relative flex flex-col max-h-[600px] ${hasRef ? 'border-amber-500/30 shadow-amber-900/10 shadow-lg' : 'border-white/5'}`}>
+                                    <div className="h-40 bg-zinc-950 relative shrink-0">
                                         {hasRef ? (
                                             <div className="w-full h-full flex">
                                                 {prod.imageRefs!.slice(0, 3).map((ref, i) => (
@@ -2956,7 +2956,7 @@ Example:
                                         <h3 className="absolute bottom-3 left-4 font-bold text-lg text-white">{prod.name}</h3>
                                         <input type="file" id={`upload-prod-${prod.id}`} className="hidden" accept="image/*" multiple onChange={(e) => handleImageUpload(e, prod.id, 'product', true)} />
                                     </div>
-                                    <div className="p-4 space-y-4">
+                                    <div className="p-4 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                                         {/* Spec Extraction Loading Indicator */}
                                         {extractingSpecsFor?.id === prod.id && extractingSpecsFor?.type === 'product' && (
                                             <div className="flex items-center gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
