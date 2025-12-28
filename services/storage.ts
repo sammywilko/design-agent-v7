@@ -50,10 +50,15 @@ export const isAuthenticated = (): boolean => {
 };
 
 /**
- * Get all projects (from Supabase if authenticated, IndexedDB if not)
+ * Get all projects (merges local IndexedDB + cloud Supabase projects)
+ * This ensures projects are visible across devices even if sync failed
  */
 export const getProjects = async (): Promise<Project[]> => {
   const user = getCurrentUser();
+
+  // Always get local projects first
+  const localProjects = await indexedDB.getProjects();
+  console.log('Local projects found:', localProjects.length);
 
   if (user && CLOUD_SYNC_ENABLED && isSupabaseConfigured()) {
     try {
@@ -66,25 +71,41 @@ export const getProjects = async (): Promise<Project[]> => {
 
       console.log('Cloud projects found:', cloudProjects.length);
 
-      if (cloudProjects.length > 0) {
-        return cloudProjects.map(cp => ({
-          id: cp.id,
-          name: cp.name,
-          createdAt: new Date(cp.created_at).getTime()
-        }));
+      // Convert cloud projects to Project format
+      const cloudProjectsList: Project[] = cloudProjects.map(cp => ({
+        id: cp.id,
+        name: cp.name,
+        createdAt: new Date(cp.created_at).getTime()
+      }));
+
+      // Merge: cloud projects take precedence for same ID
+      const projectMap = new Map<string, Project>();
+
+      // Add local projects first
+      for (const project of localProjects) {
+        projectMap.set(project.id, project);
       }
 
-      // No cloud projects - check local
-      console.log('No cloud projects, checking IndexedDB...');
-      return indexedDB.getProjects();
+      // Cloud projects override local (they have the latest synced data)
+      for (const project of cloudProjectsList) {
+        projectMap.set(project.id, project);
+      }
+
+      // Convert to array and sort by createdAt (newest first)
+      const mergedProjects = Array.from(projectMap.values());
+      mergedProjects.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+      console.log('Merged projects (local + cloud):', mergedProjects.length);
+      return mergedProjects;
     } catch (error) {
       console.error('Failed to load projects from Supabase:', error);
-      return indexedDB.getProjects();
+      // Return local projects if cloud fails
+      return localProjects;
     }
   }
 
-  // Not authenticated or cloud sync disabled - use IndexedDB
-  return indexedDB.getProjects();
+  // Not authenticated or cloud sync disabled - use IndexedDB only
+  return localProjects;
 };
 
 /**
