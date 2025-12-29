@@ -183,6 +183,17 @@
           padding-bottom: max(1rem, env(safe-area-inset-bottom));
         }
       }
+
+      /* Scout Spotlight Animation */
+      .spotlight-target {
+        animation: spotlight-pulse 1.5s ease-in-out infinite;
+        position: relative;
+        z-index: 201;
+      }
+      @keyframes spotlight-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.6); }
+        50% { box-shadow: 0 0 0 12px rgba(139, 92, 246, 0); }
+      }
     </style>
   </head>
   <body class="bg-black text-white antialiased selection:bg-sky-500/30 selection:text-sky-200">

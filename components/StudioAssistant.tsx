@@ -1,9 +1,39 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Send, X, Loader2, Sparkles, Lightbulb, AlertTriangle, CheckCircle, ChevronRight, RefreshCw, Zap, BookOpen, Film, Palette } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Bot, Send, X, Loader2, Sparkles, Lightbulb, AlertTriangle, CheckCircle, ChevronRight, RefreshCw, Zap, BookOpen, Film, Palette, Navigation, Eye } from 'lucide-react';
 import { ProducerMessage, AppStage, ProducerContext } from '../types';
 import { consultProducer, getProactiveSuggestions } from '../services/gemini';
 import ReactMarkdown from 'react-markdown';
+import SpotlightOverlay from './SpotlightOverlay';
+
+// Action types that Scout can emit
+type ScoutAction =
+  | { type: 'navigate'; target: string }
+  | { type: 'highlight'; target: string }
+  | null;
+
+// Parse action commands from AI response
+const parseScoutAction = (text: string): { cleanText: string; action: ScoutAction } => {
+  // Look for action commands at the end of the text
+  const navigateMatch = text.match(/\[ACTION:NAVIGATE:([^\]]+)\]\s*$/);
+  const highlightMatch = text.match(/\[ACTION:HIGHLIGHT:([^\]]+)\]\s*$/);
+
+  if (navigateMatch) {
+    return {
+      cleanText: text.replace(/\[ACTION:NAVIGATE:[^\]]+\]\s*$/, '').trim(),
+      action: { type: 'navigate', target: navigateMatch[1] }
+    };
+  }
+
+  if (highlightMatch) {
+    return {
+      cleanText: text.replace(/\[ACTION:HIGHLIGHT:[^\]]+\]\s*$/, '').trim(),
+      action: { type: 'highlight', target: highlightMatch[1] }
+    };
+  }
+
+  return { cleanText: text, action: null };
+};
 
 interface StudioAssistantProps {
   isOpen: boolean;
@@ -11,6 +41,7 @@ interface StudioAssistantProps {
   currentStage: AppStage;
   projectContext?: ProducerContext;
   onNavigate?: (destination: string) => void;
+  onSetActiveTab?: (tab: string) => void;
 }
 
 // Quick action buttons based on context
@@ -78,15 +109,56 @@ const StudioAssistant: React.FC<StudioAssistantProps> = ({
     onClose,
     currentStage,
     projectContext,
-    onNavigate
+    onNavigate,
+    onSetActiveTab
 }) => {
     const [messages, setMessages] = useState<ProducerMessage[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [proactiveSuggestions, setProactiveSuggestions] = useState<string | null>(null);
     const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+    const [highlightTarget, setHighlightTarget] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const hasLoadedSuggestions = useRef(false);
+
+    // Handle Scout actions (navigation and highlighting)
+    const executeAction = useCallback((action: ScoutAction) => {
+        if (!action) return;
+
+        if (action.type === 'navigate') {
+            const target = action.target;
+
+            // Handle stage navigation
+            if (target.startsWith('STAGE_')) {
+                onNavigate?.(target);
+            }
+            // Handle tab navigation within Script Studio
+            else if (target.startsWith('TAB_')) {
+                const tabMap: Record<string, string> = {
+                    'TAB_SCRIPT': 'script',
+                    'TAB_CHARACTERS': 'characters',
+                    'TAB_LOCATIONS': 'locations',
+                    'TAB_PRODUCTS': 'products',
+                    'TAB_DESIGN': 'design'
+                };
+                const tabName = tabMap[target];
+                if (tabName && onSetActiveTab) {
+                    // First navigate to Script Studio if not there
+                    if (currentStage !== 'STAGE_0_SCRIPT') {
+                        onNavigate?.('STAGE_0_SCRIPT');
+                    }
+                    // Then set the active tab
+                    setTimeout(() => onSetActiveTab(tabName), 100);
+                }
+            }
+        } else if (action.type === 'highlight') {
+            setHighlightTarget(action.target);
+        }
+    }, [onNavigate, onSetActiveTab, currentStage]);
+
+    const dismissHighlight = useCallback(() => {
+        setHighlightTarget(null);
+    }, []);
 
     // Reactive mobile detection with resize listener
     const [isMobile, setIsMobile] = useState(() =>
@@ -188,13 +260,21 @@ What can I help you with in ${stageName}?`,
             const context = projectContext || currentStage;
             const responseText = await consultProducer(userMsg.content, context);
 
+            // Parse any action commands from the response
+            const { cleanText, action } = parseScoutAction(responseText);
+
             const producerMsg: ProducerMessage = {
                 id: crypto.randomUUID(),
                 role: 'producer',
-                content: responseText,
+                content: cleanText, // Use cleaned text without action command
                 timestamp: Date.now()
             };
             setMessages(prev => [...prev, producerMsg]);
+
+            // Execute any action after a brief delay for UX
+            if (action) {
+                setTimeout(() => executeAction(action), 500);
+            }
         } catch (e) {
             console.error(e);
             const errorMsg: ProducerMessage = {
@@ -375,6 +455,12 @@ What can I help you with in ${stageName}?`,
             </div>
 
         </div>
+
+        {/* Spotlight Overlay for highlighting UI elements */}
+        <SpotlightOverlay
+            targetId={highlightTarget}
+            onDismiss={dismissHighlight}
+        />
         </>
     );
 };

@@ -1645,6 +1645,19 @@ ${clips}
         onClose={() => setIsAssistantOpen(false)}
         currentStage={stage}
         projectContext={studioAssistantContext}
+        onNavigate={(destination) => {
+          // Handle stage navigation from Scout
+          const stageMap: Record<string, AppStage> = {
+            'STAGE_0_SCRIPT': AppStage.STAGE_0_SCRIPT,
+            'STAGE_1_CONCEPT': AppStage.STAGE_1_CONCEPT,
+            'STAGE_2_EDITING': AppStage.STAGE_2_EDITING,
+            'STAGE_3_STORYBOARD': AppStage.STAGE_3_STORYBOARD,
+            'STAGE_4_VIDEO': AppStage.STAGE_4_VIDEO,
+          };
+          if (stageMap[destination]) {
+            setStage(stageMap[destination]);
+          }
+        }}
       />
 
       {/* New Agentic Producer Chat */}
