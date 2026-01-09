@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, Download, Layers, Loader2, Wand2, Save, Plus, X, Upload, ImagePlus, Brush, Eraser, Eye, EyeOff, Film, Columns, Palette, Gauge, RotateCcw, ListEnd, SkipForward, GitBranch, Home, Tag, Square, ChevronDown, Sun, Contrast, Sparkles, RotateCw, Lightbulb, Zap, FolderOpen, FolderCheck, FolderSync } from 'lucide-react';
+import { SaveToAssetBankButton } from './AssetBankPanel';
 import { GeneratedImage, ReferenceAsset, Project, SavedEntity, ProductionDesign, CharacterProfile, LocationProfile, ProductProfile, EditInstruction, VersionHistoryItem, ProductionLogEntry } from '../types';
 import { applyEdit, extractStyleDNA, evaluateImageQuality } from '../services/gemini';
 import { db } from '../services/db';
@@ -2098,12 +2099,23 @@ CRITICAL REQUIREMENTS:
              
              <div className="h-10 w-px bg-white/10 mx-2" />
              
-             <button 
+             <button
                onClick={saveToLibrary}
                disabled={!currentImage}
                className="p-4 text-zinc-400 hover:text-white hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/10 disabled:opacity-50" title="Save to Library">
                <Save className="w-5 h-5" />
              </button>
+             {/* Save to Asset Bank */}
+             {currentImage && (
+               <SaveToAssetBankButton
+                 image={currentImage}
+                 projectId={currentProject.id}
+                 projectName={currentProject.name}
+                 onSaved={() => showNotification('Saved to Asset Bank')}
+                 size="lg"
+                 className="p-2"
+               />
+             )}
              {/* Upload to Gallery */}
              {onAddToGallery && (
                <button 

@@ -1,8 +1,11 @@
 
 import React, { useState, useRef, useEffect, memo } from 'react';
 import { GeneratedImage, StoryboardFrame, SavedEntity, Project, Beat, QualityScore } from '../types';
-import { Plus, Trash2, FileDown, Wand2, ArrowRight, Layout, MonitorPlay, Upload, X, Link, GripVertical, FileSpreadsheet, Film, Loader2, Video, Ghost, ChevronUp, ChevronDown, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, FileDown, Wand2, ArrowRight, Layout, MonitorPlay, Upload, X, Link, GripVertical, FileSpreadsheet, Film, Loader2, Video, Ghost, ChevronUp, ChevronDown, AlertTriangle, CheckCircle, FolderOpen } from 'lucide-react';
 import { generateImageCaption, generateTransitionPrompt } from '../services/gemini';
+import AssetBankPanel, { SaveToAssetBankButton } from './AssetBankPanel';
+import UndoRedoControls from './UndoRedoControls';
+import { useHistory } from '../hooks/useHistory';
 
 // Quality Badge Component - shows color-coded quality score (memoized)
 const QualityBadge = memo(({ score }: { score?: QualityScore }) => {
@@ -61,7 +64,8 @@ const StageThree: React.FC<StageThreeProps> = ({
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const [draggedFrameIndex, setDraggedFrameIndex] = useState<number | null>(null);
-  
+  const [showAssetBank, setShowAssetBank] = useState(false);
+
   const sidebarFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -393,6 +397,15 @@ const StageThree: React.FC<StageThreeProps> = ({
                                 {img.generationContext.qualityScore.overall}
                             </div>
                         )}
+                        {/* Save to Asset Bank Button */}
+                        <SaveToAssetBankButton
+                            image={img}
+                            projectId={currentProject.id}
+                            projectName={currentProject.name}
+                            onSaved={() => showNotification('Saved to Asset Bank')}
+                            size="sm"
+                            className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-all"
+                        />
                         {/* Delete Button */}
                         {onRemoveAsset && (
                           <button
@@ -439,6 +452,12 @@ const StageThree: React.FC<StageThreeProps> = ({
                     </span>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => setShowAssetBank(true)}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors"
+                    >
+                        <FolderOpen className="w-4 h-4" /> Asset Bank
+                    </button>
                     <button onClick={exportCSV} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors">
                         <FileSpreadsheet className="w-4 h-4" /> Export Data (CSV)
                     </button>
@@ -628,6 +647,27 @@ const StageThree: React.FC<StageThreeProps> = ({
                 )}
             </div>
         </div>
+
+        {/* Asset Bank Panel */}
+        <AssetBankPanel
+            isOpen={showAssetBank}
+            onClose={() => setShowAssetBank(false)}
+            projectId={currentProject.id}
+            onSelectAsset={(asset) => {
+                // Import asset to pool for use in storyboard
+                const img: GeneratedImage = {
+                    id: asset.id,
+                    projectId: asset.project_id || currentProject.id,
+                    url: asset.image_url,
+                    thumbnail: asset.thumbnail_url || undefined,
+                    prompt: asset.prompt_used || asset.title || 'Asset Bank Image',
+                    aspectRatio: asset.aspect_ratio || 'custom'
+                };
+                onImportAsset(img);
+                setShowAssetBank(false);
+                showNotification('Asset added to pool');
+            }}
+        />
     </div>
   );
 };
